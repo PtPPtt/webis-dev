@@ -26,7 +26,8 @@ def load_env():
 
 
 def get_default_llm(
-    api_key: Optional[str] = None,
+    # api_key: Optional[str] = None,
+    api_key: Optional[str] = "sk-kqsyxnluwanjjpvgqtirljrgjvtgskfqktuefufzylbulclz" ,
     model: str = "deepseek-ai/DeepSeek-V3.2",
     base_url: str = "https://api.siliconflow.cn/v1",
     temperature: float = 0.0,
@@ -34,6 +35,7 @@ def get_default_llm(
     """Create default SiliconFlow LLM client."""
     load_env()
     key = api_key or os.getenv("SILICONFLOW_API_KEY")
+    print(key)
     if not key:
         raise RuntimeError(
             "缺少 SILICONFLOW_API_KEY，请设置环境变量或在 get_default_llm(api_key=...) 传入。"
