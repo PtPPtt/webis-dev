@@ -27,8 +27,10 @@ class HTMLProcessor(BaseFileProcessor):
     def __init__(self, deepseek_api_key: Optional[str] = None):
         super().__init__()
         self.supported_extensions = {".html", ".htm"}
-        # Prefer environment variable DEEPSEEK_API_KEY, fall back to provided parameter
-        self.deepseek_api_key = os.environ.get("DEEPSEEK_API_KEY") or deepseek_api_key
+        # Prefer SILICONFLOW_API_KEY, fall back to DEEPSEEK_API_KEY / provided parameter (compat)
+        self.deepseek_api_key = (
+            os.environ.get("SILICONFLOW_API_KEY") or os.environ.get("DEEPSEEK_API_KEY") or deepseek_api_key
+        )
 
     def get_processor_name(self) -> str:
         return "HTMLProcessor"
@@ -55,9 +57,9 @@ class HTMLProcessor(BaseFileProcessor):
         try:
             import requests
 
-            url = "https://api.deepseek.com/v1/chat/completions"
+            url = "https://api.siliconflow.cn/v1/chat/completions"
             payload = {
-                "model": "deepseek-chat",
+                "model": "deepseek-ai/DeepSeek-V3.2",
                 "messages": [
                     {"role": "system", "content": "Fix typos, garbled text, punctuation and formatting errors in the text. Only correct, do not add or remove content."},
                     {"role": "user", "content": text}
@@ -101,7 +103,7 @@ class HTMLProcessor(BaseFileProcessor):
                 return {
                     "success": False,
                     "text": "",
-                    "error": "webis-html extraction requires DeepSeek API key. Set DEEPSEEK_API_KEY or pass api_key"
+                    "error": "webis-html extraction requires SiliconFlow API key. Set SILICONFLOW_API_KEY (or DEEPSEEK_API_KEY for compatibility)"
                 }
 
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:

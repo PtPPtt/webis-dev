@@ -39,9 +39,9 @@ class PDFProcessor(BaseFileProcessor):
     def _ai_denoise(self, text: str) -> str:
         """AI降噪：优化文本处理逻辑，添加重试机制"""
         try:
-            api_key = os.getenv("DEEPSEEK_API_KEY")
+            api_key = os.getenv("SILICONFLOW_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
             if not api_key:
-                logger.error("[PDFProcessor] 未在环境变量中找到DEEPSEEK_API_KEY")
+                logger.error("[PDFProcessor] 未在环境变量中找到 SILICONFLOW_API_KEY")
                 return text
 
             headers = {
@@ -64,9 +64,9 @@ class PDFProcessor(BaseFileProcessor):
 
 文本内容：{chunk}"""
 
-                api_url = "https://api.deepseek.com/v1/chat/completions"
+                api_url = "https://api.siliconflow.cn/v1/chat/completions"
                 payload = {
-                    "model": "deepseek-chat",
+                    "model": "deepseek-ai/DeepSeek-V3.2",
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.1,
                     "max_tokens": 2048  # 补充最大生成token限制
@@ -105,7 +105,7 @@ class PDFProcessor(BaseFileProcessor):
             if text != raw_text:
                 logger.info(f"[PDFProcessor] AI降噪完成，降噪后文本长度：{len(text)}")
             else:
-                logger.warning("[PDFProcessor] 未启用AI降噪（未配置环境变量DEEPSEEK_API_KEY或降噪失败）")
+                logger.warning("[PDFProcessor] 未启用AI降噪（未配置 SILICONFLOW_API_KEY 或降噪失败）")
 
             logger.info(
                 f"[PDFProcessor] Successfully processed PDF: {file_path}, pages: {len(docs)}, text length: {len(text)}")

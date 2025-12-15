@@ -6,6 +6,7 @@ Process image files and perform text recognition with noise reduction
 """
 
 import logging
+import os
 import re
 from typing import Dict, Union, Optional
 from .base_processor import BaseFileProcessor
@@ -20,7 +21,9 @@ class ImageProcessor(BaseFileProcessor):
         super().__init__()
         self.supported_extensions = {'.png', '.jpg', '.jpeg', '.bmp', '.tiff', '.tif'}
         self._reader = None
-        self.deepseek_api_key = deepseek_api_key  # Optional API key for DeepSeek enhancement
+        self.deepseek_api_key = (
+            deepseek_api_key or os.getenv("SILICONFLOW_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
+        )  # Optional key for SiliconFlow enhancement
     
     def get_processor_name(self) -> str:
         """Get processor name"""
@@ -101,9 +104,9 @@ class ImageProcessor(BaseFileProcessor):
             import requests
             import json
             
-            url = "https://api.deepseek.com/v1/chat/completions"  # Adjust if needed
+            url = "https://api.siliconflow.cn/v1/chat/completions"
             payload = {
-                "model": "deepseek-chat",
+                "model": "deepseek-ai/DeepSeek-V3.2",
                 "messages": [
                     {"role": "system", "content": "You are an OCR text corrector. Fix errors in the following text without adding or removing content."},
                     {"role": "user", "content": text}

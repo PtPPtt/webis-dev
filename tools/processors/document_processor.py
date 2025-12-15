@@ -42,9 +42,9 @@ class DocumentProcessor(BaseFileProcessor):
     def _ai_denoise(self, text: str) -> str:
         """AI降噪：重点处理docx表格+Markdown语法清洗，添加重试机制"""
         try:
-            api_key = os.getenv("DEEPSEEK_API_KEY")
+            api_key = os.getenv("SILICONFLOW_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
             if not api_key:
-                logger.error("[DocumentProcessor] 未在环境变量中找到DEEPSEEK_API_KEY")
+                logger.error("[DocumentProcessor] 未在环境变量中找到 SILICONFLOW_API_KEY")
                 return text
 
             headers = {
@@ -74,9 +74,9 @@ class DocumentProcessor(BaseFileProcessor):
 
 文本内容：{chunk}"""
 
-                api_url = "https://api.deepseek.com/v1/chat/completions"
+                api_url = "https://api.siliconflow.cn/v1/chat/completions"
                 payload = {
-                    "model": "deepseek-chat",
+                    "model": "deepseek-ai/DeepSeek-V3.2",
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.1,
                     "max_tokens": 2048
@@ -130,7 +130,7 @@ class DocumentProcessor(BaseFileProcessor):
             if text != raw_text:
                 logger.info(f"[DocumentProcessor] AI降噪完成，降噪后文本长度：{len(text)}")
             else:
-                logger.warning("[DocumentProcessor] 未启用AI降噪（未配置环境变量DEEPSEEK_API_KEY或降噪失败）")
+                logger.warning("[DocumentProcessor] 未启用AI降噪（未配置 SILICONFLOW_API_KEY 或降噪失败）")
 
             logger.info(
                 f"[DocumentProcessor] Successfully processed document: {file_path}, text length: {len(text)}")
