@@ -54,10 +54,14 @@ class StructureExtractionAgent:
         return ExtractionResult(True, output_format, raw=raw, parsed=raw)
 
     def _build_chain(self, prompt: str, output_format: OutputFormat):
+        # ChatPromptTemplate uses `{var}` for templating. The upstream prompt often contains
+        # JSON examples like `{ "items": [...] }`, which would be treated as template vars.
+        # Escape braces so the prompt is treated as literal text.
+        escaped_prompt = prompt.replace("{", "{{").replace("}", "}}")
         system = (
             "你是结构抽取助手。严格按上游提供的抽取 Prompt 执行。"
             "不要编造信息；若文本缺失字段请返回空/未知。\n\n"
-            f"抽取 Prompt：\n{prompt}\n"
+            f"抽取 Prompt：\n{escaped_prompt}\n"
         )
         tpl = ChatPromptTemplate.from_messages(
             [
@@ -76,4 +80,3 @@ class StructureExtractionAgent:
         candidate = fenced.group(1) if fenced else raw
         candidate = candidate.strip()
         return json.loads(candidate)
-

@@ -4,18 +4,31 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+from datetime import datetime
 from pathlib import Path
 
 from extract_agent import StructureExtractionAgent
 from llm import get_default_llm
 from prompt_agent import PromptBuilderAgent
-from validation.manager import create_validator, ValidationManager  # 新增
+from validation.manager import EnhancedValidationManager  # 新增
 
 
 def read_texts(inputs):
-    texts = []
+    paths = []
     for p in inputs:
         path = Path(p)
+        if path.is_dir():
+            # 默认读取该目录下的所有 .txt 文件（不递归）
+            paths.extend(sorted(path.glob("*.txt")))
+        else:
+            paths.append(path)
+
+    if not paths:
+        raise FileNotFoundError("inputs 为空：未找到可读取的文本文件（*.txt）。")
+
+    texts = []
+    for path in paths:
         texts.append(path.read_text(encoding="utf-8"))
     return texts
 
@@ -23,55 +36,37 @@ def read_texts(inputs):
 def main():
     parser = argparse.ArgumentParser(description="Structuring module demo.")
     parser.add_argument("goal", help="用户的结构化目标（自然语言）")
-    parser.add_argument("--inputs", nargs="+", required=True, help="输入文本文件路径列表")
-    parser.add_argument("--format", default="json", choices=["json", "markdown", "table"], help="输出格式")
-    parser.add_argument("--schema", default=None, help="可选的 schema JSON 文件路径")
-    parser.add_argument("--fewshots", default=None, help="可选的 few-shot JSON 文件路径")
-    parser.add_argument("--limit", type=int, default=3, help="仅用于 demo，截取前 N 个文本做 prompt 构造")
-
-    # 新增验证参数
-    parser.add_argument("--validate", action="store_true", help="启用结果验证")
-    parser.add_argument("--validation-config", default=None,
-                        help="验证配置文件路径 (JSON)")
+    parser.add_argument(
+        "--inputs",
+        nargs="+",
+        required=True,
+        help="输入纯文本文件路径列表，或目录路径（目录默认读取其中所有 *.txt，不递归）",
+    )
+    # 按你的需求，CLI 只保留 goal + inputs 两个参数；其它行为使用默认值：
+    # - 自动推断 output_format（json/markdown/table）
+    # - 自动保存结果到 structuring/outputs/
 
     args = parser.parse_args()
 
     llm = get_default_llm()
     texts = read_texts(args.inputs)
 
-    schema = json.loads(Path(args.schema).read_text(encoding="utf-8")) if args.schema else None
-    fewshots = json.loads(Path(args.fewshots).read_text(encoding="utf-8")) if args.fewshots else None
-
     prompt_agent = PromptBuilderAgent(llm)
     extraction_agent = StructureExtractionAgent(llm)
 
-    validator_config = {}
-    # 如果指定了配置文件，加载其内容
-    if args.validation_config:
-        try:
-            with open(args.validation_config, 'r', encoding='utf-8') as f:
-                validator_config = json.load(f)
-                print("使用配置文件：" + args.validation_config)
-        except FileNotFoundError:
-            print(f"警告：验证配置文件 '{args.validation_config}' 未找到，使用默认配置")
-        except json.JSONDecodeError as e:
-            print(f"警告：验证配置文件 '{args.validation_config}' JSON格式错误: {e}，使用默认配置")
-        except Exception as e:
-            print(f"警告：读取验证配置文件时出错: {e}，使用默认配置")
-
-    prompt = prompt_agent.build(
+    prompt, output_format = prompt_agent.build_with_format(
         goal=args.goal,
-        texts=texts[: args.limit],
-        output_format=args.format,
-        schema=schema,
-        few_shots=fewshots,
+        texts=texts,
+        schema=None,
+        few_shots=[],
     )
     print("\n===== Generated Extraction Prompt =====\n")
     print(prompt)
 
-    result = extraction_agent.extract(prompt=prompt, text=texts, output_format=args.format)
+    result = extraction_agent.extract(prompt=prompt, text=texts, output_format=output_format)
     print("\n===== Extraction Result =====\n")
 
+    # Prepare result text for saving and validation loop
     if result.output_format == "json" and result.parsed is not None:
         print(json.dumps(result.parsed, ensure_ascii=False, indent=2))
         result_text = json.dumps(result.parsed, ensure_ascii=False)
@@ -79,45 +74,61 @@ def main():
         print(result.raw)
         result_text = result.raw
 
-    """ ========== 验证步骤 ========== """
-    if args.validate and result.success:
-        print("\n" + "=" * 60)
-        print("启动智能验证与优化循环")
-        print("=" * 60)
+    # Optional validation/optimization loop (keep CLI minimal: controlled by env var)
+    # Enable by: export STRUCTURING_VALIDATE=1
+    optimization_result = None
+    if os.getenv("STRUCTURING_VALIDATE") == "1" and result.success:
+        config_path = Path(__file__).resolve().parent / "config.json"
+        validator_config = {}
+        if config_path.exists():
+            try:
+                validator_config = json.loads(config_path.read_text(encoding="utf-8"))
+            except Exception:
+                validator_config = {}
 
-        # 创建增强的验证管理器
-        from validation.manager import EnhancedValidationManager
         enhanced_validator = EnhancedValidationManager(llm, validator_config)
-
-        # 运行自回归优化循环
         optimization_result = enhanced_validator.run_validation_loop(
-            initial_prompt=prompt,  # 初始抽取Prompt
-            initial_result=result_text,  # 初始提取结果
-            original_text=texts,  # 原始文本
-            original_goal=args.goal,  # 用户原始目标
-            max_retries=2,  # 最大优化次数
-            prompt_agent=prompt_agent,  # 传入PromptBuilderAgent
+            initial_prompt=prompt,
+            initial_result=result_text,
+            original_text=texts,
+            original_goal=args.goal,
+            max_retries=2,
+            prompt_agent=prompt_agent,
             extraction_agent=extraction_agent,
-            output_format=args.format
-
+            output_format=output_format,
         )
 
-        # 输出最终结果
-        print(f"\n最终质量得分: {optimization_result['final_score']:.2f}/5")
-        print(f"优化轮次: {optimization_result['optimization_count']}")
+        prompt = optimization_result.get("final_prompt", prompt)
+        result_text = optimization_result.get("final_result", result_text)
 
-        if optimization_result['passed']:
-            print("✅ 经过优化，结果质量已达标！")
-        else:
-            print("⚠️  经过优化，结果质量仍有提升空间。")
+        if "final_score" in optimization_result:
+            print(f"\n最终质量得分: {optimization_result['final_score']:.2f}/5")
+        if "optimization_count" in optimization_result:
+            print(f"优化轮次: {optimization_result['optimization_count']}")
 
-        #  保存优化历史
-        serializable_history = convert_to_serializable(optimization_result["history"])
+    # Save outputs to file
+    outputs_dir = Path(__file__).resolve().parent / "outputs"
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    suffix = "json" if output_format == "json" else "md"
+    out_path = outputs_dir / f"structuring_result_{ts}.{suffix}"
 
-        with open('output.json', 'w', encoding='utf-8') as f:
-            json.dump(serializable_history, f, ensure_ascii=False, indent=2)
+    out_path.write_text(result_text, encoding="utf-8")
 
-        print("优化历史已保存到: output.json")
+    print(f"\n已保存结果到: {out_path}")
+
+    prompt_path = out_path.with_suffix(out_path.suffix + ".prompt.txt")
+    prompt_path.write_text(prompt, encoding="utf-8")
+    print(f"已保存 Prompt 到: {prompt_path}")
+
+    if os.getenv("STRUCTURING_VALIDATE") == "1" and optimization_result is not None:
+        history_path = out_path.with_suffix(out_path.suffix + ".validation_history.json")
+        try:
+            serializable_history = convert_to_serializable(optimization_result.get("history", []))
+            history_path.write_text(json.dumps(serializable_history, ensure_ascii=False, indent=2), encoding="utf-8")
+            print(f"已保存优化历史到: {history_path}")
+        except Exception:
+            pass
 
 
 def convert_to_serializable(obj):
@@ -141,4 +152,3 @@ def convert_to_serializable(obj):
 
 if __name__ == "__main__":
     main()
-

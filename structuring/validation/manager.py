@@ -293,9 +293,10 @@ class EnhancedValidationManager(ValidationManager):
 
             # 5. 这里应该调用你的提取流程重新提取
             # 注意：在实际集成中，你需要在这里触发重新提取
-            new_result = extraction_agent.extract(prompt=current_prompt, text=original_text, output_format=output_format)
+            new_extraction = extraction_agent.extract(prompt=current_prompt, text=original_text, output_format=output_format)
             # print("提示：此处应触发重新提取流程。")
-            current_result = new_result
+            # 下一轮 validate 期望字符串，因此这里保存为文本（JSON 时保存 raw 文本也可）
+            current_result = new_extraction.raw if hasattr(new_extraction, "raw") else str(new_extraction)
 
         return {"final_result": current_result,
                 "history": loop_history,

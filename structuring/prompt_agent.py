@@ -4,11 +4,16 @@
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
+
+
+OutputFormat = Literal["json", "markdown", "table"]
 
 
 @dataclass
@@ -32,6 +37,7 @@ class PromptBuilderAgent:
         self._chain = self._build_chain()
         # 新增：构建优化的链
         self._refine_chain = self._build_refine_chain()
+        self._plan_chain = self._build_plan_chain()
 
     def build(self, goal: str, texts: List[str], output_format: str = "json", schema=None, few_shots=None) -> str:
         payload = PromptBuildInput(
@@ -42,6 +48,30 @@ class PromptBuilderAgent:
             few_shots=few_shots or [],
         )
         return self._chain.invoke(payload.__dict__)
+
+    def build_with_format(
+        self, goal: str, texts: List[str], schema=None, few_shots=None
+    ) -> Tuple[str, OutputFormat]:
+        """
+        单次 LLM 调用同时决定输出格式 + 生成抽取 Prompt，避免额外“格式路由”调用。
+
+        Returns:
+            (prompt, output_format)
+        """
+        raw = self._plan_chain.invoke(
+            {
+                "goal": goal,
+                "schema": schema,
+                "few_shots": few_shots or [],
+                "texts": texts,
+            }
+        )
+        plan = self._safe_json_parse(raw)
+        fmt = (plan.get("output_format") or "json").strip().lower()
+        if fmt not in ("json", "markdown", "table"):
+            fmt = "json"
+        prompt = plan.get("prompt") or ""
+        return prompt, fmt  # type: ignore[return-value]
 
     def refine(self, original_prompt: str, feedback: str) -> str:
         """
@@ -94,6 +124,37 @@ class PromptBuilderAgent:
         )
         return prompt | self.llm | StrOutputParser()
 
+    def _build_plan_chain(self):
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                (
+                    "system",
+                    "你是数据结构化任务的 Prompt 构造助手。\n"
+                    "你需要同时完成两件事：\n"
+                    "A) 根据用户目标决定输出格式 output_format（只能是 json / markdown / table 三选一）；\n"
+                    "B) 生成用于结构抽取的 Prompt（给下游抽取 Agent 使用）。\n\n"
+                    "输出要求：只输出一个严格 JSON 对象，且只包含两个 key：\n"
+                    "1) output_format: \"json\" | \"markdown\" | \"table\"\n"
+                    "2) prompt: \"...\"\n\n"
+                    "决策规则：\n"
+                    "- 如果用户明确要结构化数据/字段/可程序处理/数据文件 -> json\n"
+                    "- 如果用户要报告/总结/分析/可读性强长文 -> markdown\n"
+                    "- 如果用户要表格/对比清单/可复制到 Excel -> table\n\n"
+                    "重要约束：\n"
+                    "- JSON 必须可被直接解析，不要输出任何额外文本、代码块或解释。\n"
+                    "- prompt 字符串里不得包含任何未转义的模板占位符；若要有，则用()代替。\n",
+                ),
+                (
+                    "human",
+                    "用户结构化目标：\n{goal}\n\n"
+                    "字段模板 schema（可能为空）：\n{schema}\n\n"
+                    "Few-shot 示例（可能为空）：\n{few_shots}\n\n"
+                    "输入文本（节选/合并）：\n{texts}\n",
+                ),
+            ]
+        )
+        return prompt | self.llm | StrOutputParser()
+
     def _build_refine_chain(self):
         """构建Prompt优化链"""
         prompt = ChatPromptTemplate.from_messages(
@@ -120,3 +181,8 @@ class PromptBuilderAgent:
             ]
         )
         return prompt | self.llm | StrOutputParser()
+
+    def _safe_json_parse(self, raw: str) -> Dict[str, Any]:
+        fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", raw or "", re.S)
+        candidate = fenced.group(1) if fenced else (raw or "")
+        return json.loads(candidate.strip())
