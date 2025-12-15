@@ -1,63 +1,39 @@
-from __future__ import annotations
-
 import os
-import json
-import time
 import requests
-import sys
-import pathlib
-
-if not __package__:
-    sys.path.append(str(pathlib.Path(__file__).resolve().parent))
-    from tool_base import BaseTool, ToolResult
-else:
-    from .tool_base import BaseTool, ToolResult
+from tool_base import BaseTool, ToolResult
 
 
 class HackerNewsTool(BaseTool):
-    """
-    Community discussion search via Hacker News (Algolia API).
-    """
-
-    name = "community_search"
+    name = "hackernews"
     description = (
-        "搜索 Hacker News 社区讨论。适合获取工程师观点、技术趋势和实践经验。"
+        "从 Hacker News 获取热门讨论链接，并抓取原网页保存为 HTML 文件。"
     )
 
-    def __init__(self):
-        self.search_url = "https://hn.algolia.com/api/v1/search"
+    def __init__(self, output_dir: str):
+        self.output_dir = output_dir
 
-    def run(self, task: str, limit: int = 5, **kwargs) -> ToolResult:
-        ts = int(time.time())
-        output_dir = f"community_outputs/{ts}"
-        os.makedirs(output_dir, exist_ok=True)
+    def run(self, task: str, limit: int) -> ToolResult:
+        ids = requests.get(
+            "https://hacker-news.firebaseio.com/v0/topstories.json"
+        ).json()[:limit]
 
-        params = {
-            "query": task,
-            "tags": "story",
-            "hitsPerPage": limit,
-        }
+        files = []
 
-        try:
-            r = requests.get(self.search_url, params=params, timeout=15)
-            r.raise_for_status()
-            hits = r.json().get("hits", [])
+        for i in ids:
+            item = requests.get(
+                f"https://hacker-news.firebaseio.com/v0/item/{i}.json"
+            ).json()
+            url = item.get("url")
+            if not url:
+                continue
 
-            out = os.path.join(output_dir, "hackernews.json")
-            with open(out, "w", encoding="utf-8") as f:
-                json.dump(hits, f, ensure_ascii=False, indent=2)
+            html = requests.get(url, timeout=20).text
+            path = os.path.join(self.output_dir, f"hn_{i}.html")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(html)
+            files.append(path)
 
-            return ToolResult(
-                name=self.name,
-                success=True,
-                output_dir=output_dir,
-                files=[out],
-                meta={"query": task, "count": len(hits)},
-            )
+        if not files:
+            return ToolResult(self.name, False, error="HN 未抓取到页面")
 
-        except Exception as e:
-            return ToolResult(
-                name=self.name,
-                success=False,
-                error=str(e),
-            )
+        return ToolResult(self.name, True, files)

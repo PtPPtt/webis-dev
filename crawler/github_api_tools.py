@@ -1,63 +1,36 @@
-from __future__ import annotations
-
 import os
-import json
-import time
 import requests
-import sys
-import pathlib
-
-if not __package__:
-    sys.path.append(str(pathlib.Path(__file__).resolve().parent))
-    from tool_base import BaseTool, ToolResult
-else:
-    from .tool_base import BaseTool, ToolResult
+from tool_base import BaseTool, ToolResult
 
 
 class GitHubSearchTool(BaseTool):
-    name = "code_search"
+    name = "github"
     description = (
-        "搜索 GitHub 开源仓库。适合查找真实代码实现和工程项目。"
+        "使用 GitHub API 搜索代码仓库，并保存 README 或仓库主页为 HTML/MD 文件。"
     )
 
-    def __init__(self, token: str | None = None):
-        self.token = token or os.getenv("GITHUB_TOKEN")
-        self.base_url = "https://api.github.com/search/repositories"
+    def __init__(self, output_dir: str):
+        self.output_dir = output_dir
 
-    def run(self, task: str, limit: int = 5, **kwargs) -> ToolResult:
-        ts = int(time.time())
-        output_dir = f"code_outputs/{ts}"
-        os.makedirs(output_dir, exist_ok=True)
+    def run(self, task: str, limit: int) -> ToolResult:
+        url = "https://api.github.com/search/repositories"
+        r = requests.get(url, params={"q": task, "per_page": limit})
+        r.raise_for_status()
+        items = r.json().get("items", [])
 
-        headers = {"Accept": "application/vnd.github+json"}
-        if self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
+        files = []
 
-        params = {
-            "q": task,
-            "sort": "stars",
-            "order": "desc",
-            "per_page": limit,
-        }
-
-        try:
-            r = requests.get(
-                self.base_url, headers=headers, params=params, timeout=20
+        for repo in items:
+            html_url = repo["html_url"]
+            path = os.path.join(
+                self.output_dir, repo["name"][:50] + ".html"
             )
-            r.raise_for_status()
-            repos = r.json().get("items", [])
+            page = requests.get(html_url)
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(page.text)
+            files.append(path)
 
-            out = os.path.join(output_dir, "github_repos.json")
-            with open(out, "w", encoding="utf-8") as f:
-                json.dump(repos, f, ensure_ascii=False, indent=2)
+        if not files:
+            return ToolResult(self.name, False, error="未获取任何 GitHub 页面")
 
-            return ToolResult(
-                name=self.name,
-                success=True,
-                output_dir=output_dir,
-                files=[out],
-                meta={"query": task, "count": len(repos)},
-            )
-
-        except Exception as e:
-            return ToolResult(name=self.name, success=False, error=str(e))
+        return ToolResult(self.name, True, files)
