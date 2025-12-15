@@ -1,10 +1,7 @@
-"""Data-source agent built on LangChain (using create_agent) to route tasks to tools."""
-
-
+"""
+Data-source agent built on LangChain to route tasks to tools.
 """
 
-python crawler/agent.py "帮我搜索llm相关文件" --limit 20
-"""
 from __future__ import annotations
 
 import argparse
@@ -20,22 +17,36 @@ except ImportError:
     find_dotenv = None
     load_dotenv = None
 
+# ===== LangChain imports (stable for 0.1.x) =====
 try:
-    from langchain.agents import create_agent
+    from langchain.agents import initialize_agent, AgentType
     from langchain_core.tools import Tool
 except ImportError as exc:  # noqa: BLE001
     raise ImportError(
-        "缺少 LangChain 相关依赖，请先安装：`pip install langchain langchain-openai`。"
+        "缺少 LangChain 相关依赖，请确认安装："
+        "`pip install langchain==0.1.20 langchain-openai==0.1.7`"
     ) from exc
 
-if __package__ is None:
-    # 允许直接脚本运行：python crawler/agent.py ...
+# ===== Local tool imports =====
+if not __package__:
+    # 脚本方式运行：python agent.py
     sys.path.append(str(pathlib.Path(__file__).resolve().parent))
-    from ddg_scrapy_tool import DuckDuckGoScrapyTool  # type: ignore  # noqa: E402
-    from tool_base import BaseTool, ToolResult  # type: ignore  # noqa: E402
+
+    from ddg_scrapy_tool import DuckDuckGoScrapyTool
+    from tool_base import BaseTool, ToolResult
+    from gnews_tool import GNewsTool
+    from semantic_scholar import SemanticScholarTool
+    from github_api_tools import GitHubSearchTool
+    from hn_tool import HackerNewsTool
 else:
-    from .ddg_scrapy_tool import DuckDuckGoScrapyTool  # type: ignore
-    from .tool_base import BaseTool, ToolResult  # type: ignore
+    # 包方式运行：python -m crawler.agent
+    from .ddg_scrapy_tool import DuckDuckGoScrapyTool
+    from .tool_base import BaseTool, ToolResult
+    from .gnews_tool import GNewsTool
+    from .semantic_scholar import SemanticScholarTool
+    from .github_api_tools import GitHubSearchTool
+    from .hn_tool import HackerNewsTool
+
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -55,24 +66,31 @@ def _load_env():
 
 class LangChainDataSourceAgent:
     """
-    LangChain-based agent: uses an LLM + create_agent to pick and call tools.
-    Works with langchain>=1.1（仅暴露 create_agent）.
+    LangChain-based agent that uses an LLM to decide which tool to call.
+    Compatible with langchain 0.1.x (initialize_agent).
     """
 
-    def __init__(self, llm, tools: Optional[List[BaseTool]] = None, verbose: bool = False):
-        if tools is None:
-            tools = []
+    def __init__(
+        self,
+        llm,
+        tools: Optional[List[BaseTool]] = None,
+        verbose: bool = False,
+    ):
         self.llm = llm
         self.verbose = verbose
-        self.tools: Dict[str, BaseTool] = {tool.name: tool for tool in tools}
-        self.lc_tools = [self._wrap_tool_for_langchain(tool) for tool in tools]
-        self.agent = self._build_agent()
+        self.tools: Dict[str, BaseTool] = {}
+        self.lc_tools: List[Tool] = []
         self.last_result: Optional[ToolResult] = None
+
+        if tools:
+            for tool in tools:
+                self.register_tool(tool)
+
+        self.agent = self._build_agent()
 
     def register_tool(self, tool: BaseTool):
         self.tools[tool.name] = tool
         self.lc_tools.append(self._wrap_tool_for_langchain(tool))
-        self.agent = self._build_agent()
         logger.info("Registered tool: %s", tool.name)
 
     def available_tools(self) -> List[str]:
@@ -81,8 +99,8 @@ class LangChainDataSourceAgent:
     def run(self, task: str, **kwargs) -> ToolResult:
         logger.info("Agent received task: %s", task)
         self.last_result = None
-        # langchain 1.1 create_agent expects messages key
-        _ = self.agent.invoke({"messages": [{"role": "user", "content": task}], **kwargs})
+
+        _ = self.agent.run(task)
 
         if self.last_result:
             return self.last_result
@@ -95,13 +113,13 @@ class LangChainDataSourceAgent:
         )
 
     def _wrap_tool_for_langchain(self, tool: BaseTool) -> Tool:
-        """Wrap BaseTool as a LangChain Tool while capturing the latest result."""
+        """Wrap BaseTool as a LangChain Tool and capture execution result."""
 
         def _run(task: str, limit: int = 5, **kwargs):
             result = tool.run(task=task, limit=limit, **kwargs)
             self.last_result = result
             if result.success:
-                return f"success; output_dir={result.output_dir}; files={len(result.files)}"
+                return f"success; files={len(result.files)}"
             return f"error: {result.error}"
 
         return Tool(
@@ -111,19 +129,30 @@ class LangChainDataSourceAgent:
         )
 
     def _build_agent(self):
-        return create_agent(
-            model=self.llm,
+        return initialize_agent(
             tools=self.lc_tools,
-            system_prompt="你是数据源获取助手。根据用户的任务选择并调用合适的工具。若无合适工具则直接说明。",
+            llm=self.llm,
+            agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+            verbose=self.verbose,
         )
 
 
 def cli():
     parser = argparse.ArgumentParser(description="Data-source agent demo.")
-    parser.add_argument("task", help="Natural-language task/keyword to fetch data for.")
-    parser.add_argument("--limit", type=int, default=5, help="Max results for crawler tools.")
-    parser.add_argument("--model", type=str, default="deepseek-ai/DeepSeek-V3.2", help="LLM model name (SiliconFlow).")
-    parser.add_argument("--api-key", type=str, default=None, help="SiliconFlow API key (env SILICONFLOW_API_KEY).")
+    parser.add_argument("task", help="Natural-language task to fetch data for.")
+    parser.add_argument("--limit", type=int, default=5, help="Max results for tools.")
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="deepseek-ai/DeepSeek-V3.2",
+        help="LLM model name (SiliconFlow).",
+    )
+    parser.add_argument(
+        "--api-key",
+        type=str,
+        default=None,
+        help="SiliconFlow API key (env SILICONFLOW_API_KEY).",
+    )
     args = parser.parse_args()
 
     _load_env()
@@ -131,11 +160,15 @@ def cli():
     try:
         from langchain_openai import ChatOpenAI
     except ImportError as exc:  # noqa: BLE001
-        raise ImportError("需要安装 langchain-openai 才能在 CLI 演示中创建 LLM：`pip install langchain-openai`") from exc
+        raise ImportError(
+            "需要安装 langchain-openai：`pip install langchain-openai==0.1.7`"
+        ) from exc
 
     api_key = args.api_key or os.getenv("SILICONFLOW_API_KEY")
     if not api_key:
-        raise RuntimeError("缺少 SiliconFlow API Key，请设置环境变量 SILICONFLOW_API_KEY 或使用 --api-key 传入。")
+        raise RuntimeError(
+            "缺少 SiliconFlow API Key，请设置环境变量 SILICONFLOW_API_KEY"
+        )
 
     llm = ChatOpenAI(
         model=args.model,
@@ -143,8 +176,18 @@ def cli():
         base_url="https://api.siliconflow.cn/v1",
         api_key=api_key,
     )
-    ddg_tool = DuckDuckGoScrapyTool()
-    agent = LangChainDataSourceAgent(llm=llm, tools=[ddg_tool], verbose=True)
+
+    agent = LangChainDataSourceAgent(
+        llm=llm,
+        tools=[
+            DuckDuckGoScrapyTool(),
+            GNewsTool(),
+            SemanticScholarTool(),
+            GitHubSearchTool(),
+            HackerNewsTool(),
+        ],
+        verbose=True,
+    )
 
     result = agent.run(task=args.task, limit=args.limit)
 
