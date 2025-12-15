@@ -31,6 +31,33 @@ class HTMLProcessor(BaseFileProcessor):
         self.deepseek_api_key = (
             os.environ.get("SILICONFLOW_API_KEY") or os.environ.get("DEEPSEEK_API_KEY") or deepseek_api_key
         )
+        self._ensure_webis_html_env()
+
+    def _ensure_webis_html_env(self) -> None:
+        """
+        webis-html 内部默认读取环境变量：
+        - LLM_PREDICTOR_API_KEY 或 DEEPSEEK_API_KEY
+        - LLM_PREDICTOR_API_URL / LLM_PREDICTOR_MODEL
+
+        为了与本项目统一（SILICONFLOW_API_KEY + DeepSeek-V3.2），这里做一次环境变量映射。
+        """
+        if not self.deepseek_api_key:
+            return
+
+        # webis-html 不认识 SILICONFLOW_API_KEY，这里把它映射到它读取的变量名上，
+        # 保证你只需要配置 SILICONFLOW_API_KEY 一处即可。
+        os.environ.setdefault("LLM_PREDICTOR_API_KEY", self.deepseek_api_key)
+        os.environ.setdefault("LLM_PREDICTOR_API_URL", "https://api.siliconflow.cn/v1/chat/completions")
+        os.environ.setdefault("LLM_PREDICTOR_MODEL", "deepseek-ai/DeepSeek-V3.2")
+
+        try:
+            from webis_html.core import llm_predictor  # type: ignore
+
+            if getattr(llm_predictor, "_API_KEY_CACHE", None) is None:
+                return
+            llm_predictor._API_KEY_CACHE = None  # type: ignore[attr-defined]
+        except Exception:
+            return
 
     def get_processor_name(self) -> str:
         return "HTMLProcessor"

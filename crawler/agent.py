@@ -1,18 +1,17 @@
-"""Data-source agent built on LangChain (using create_agent) to route tasks to tools."""
+"""数据源获取 Agent：用 LLM 做工具路由，并在主线程同步执行工具。"""
 
-
-"""
-
-python crawler/agent.py "帮我搜索llm相关文件" --limit 20
-"""
+# 用法：
+#   python -m crawler.agent "帮我搜索 llm 相关文件" --limit 20
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import pathlib
+import re
 import sys
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 try:
     from dotenv import find_dotenv, load_dotenv
@@ -21,8 +20,7 @@ except ImportError:
     load_dotenv = None
 
 try:
-    from langchain.agents import create_agent
-    from langchain_core.tools import Tool
+    from langchain_core.messages import HumanMessage, SystemMessage
 except ImportError as exc:  # noqa: BLE001
     raise ImportError(
         "缺少 LangChain 相关依赖，请先安装：`pip install langchain langchain-openai`。"
@@ -45,18 +43,26 @@ def _load_env():
     """Load .env or .env.local if python-dotenv is available."""
     if not find_dotenv or not load_dotenv:
         return
-    for fname in (".env.local", ".env"):
+    project_root = pathlib.Path(__file__).resolve().parents[1]
+    for fname in (".env", ".env.local"):
+        direct = project_root / fname
+        if direct.exists():
+            load_dotenv(str(direct), override=False)
+            logger.info("Loaded environment from %s", direct)
+            return
+    for fname in (".env", ".env.local"):
         path = find_dotenv(fname, usecwd=True)
         if path:
             load_dotenv(path, override=False)
             logger.info("Loaded environment from %s", path)
-            break
+            return
 
 
 class LangChainDataSourceAgent:
     """
-    LangChain-based agent: uses an LLM + create_agent to pick and call tools.
-    Works with langchain>=1.1（仅暴露 create_agent）.
+    数据源获取 Agent：
+    - 用 LLM 在「已注册 tools」中选择最合适的一个
+    - 然后在主线程同步调用 tool.run(...)（避免 Scrapy/Twisted 在线程池里跑导致 signal 报错）
     """
 
     def __init__(self, llm, tools: Optional[List[BaseTool]] = None, verbose: bool = False):
@@ -65,14 +71,10 @@ class LangChainDataSourceAgent:
         self.llm = llm
         self.verbose = verbose
         self.tools: Dict[str, BaseTool] = {tool.name: tool for tool in tools}
-        self.lc_tools = [self._wrap_tool_for_langchain(tool) for tool in tools]
-        self.agent = self._build_agent()
-        self.last_result: Optional[ToolResult] = None
+        self.last_choice: Optional[dict] = None
 
     def register_tool(self, tool: BaseTool):
         self.tools[tool.name] = tool
-        self.lc_tools.append(self._wrap_tool_for_langchain(tool))
-        self.agent = self._build_agent()
         logger.info("Registered tool: %s", tool.name)
 
     def available_tools(self) -> List[str]:
@@ -80,42 +82,87 @@ class LangChainDataSourceAgent:
 
     def run(self, task: str, **kwargs) -> ToolResult:
         logger.info("Agent received task: %s", task)
-        self.last_result = None
-        # langchain 1.1 create_agent expects messages key
-        _ = self.agent.invoke({"messages": [{"role": "user", "content": task}], **kwargs})
+        if not self.tools:
+            return ToolResult(name="agent", success=False, error="未注册任何 tools，无法执行任务。")
 
-        if self.last_result:
-            return self.last_result
+        tool_name, tool_task, tool_kwargs = self._choose_tool(task=task, **kwargs)
+        self.last_choice = {"tool_name": tool_name, "tool_task": tool_task, "tool_kwargs": tool_kwargs}
 
-        return ToolResult(
-            name="langchain_agent",
-            success=False,
-            error="Agent finished without tool result.",
-            meta={"raw_output": _},
+        tool = self.tools.get(tool_name)
+        if tool is None:
+            fallback = next(iter(self.tools.values()))
+            logger.warning("LLM chose unknown tool '%s', fallback to '%s'", tool_name, fallback.name)
+            tool = fallback
+            tool_name = tool.name
+
+        merged_kwargs = dict(tool_kwargs)
+        merged_kwargs.update({k: v for k, v in kwargs.items() if v is not None})
+        try:
+            return tool.run(task=tool_task, **merged_kwargs)
+        except Exception as exc:  # noqa: BLE001
+            return ToolResult(
+                name=tool_name,
+                success=False,
+                error=str(exc),
+                meta={"task": task, "tool_task": tool_task, "tool_kwargs": merged_kwargs},
+            )
+
+    def _choose_tool(self, task: str, **kwargs) -> Tuple[str, str, dict]:
+        """
+        用一次 LLM 调用做路由：
+        返回 (tool_name, tool_task, tool_kwargs)
+        """
+        tools_spec = "\n".join([f"- {t.name}: {t.description}" for t in self.tools.values()])
+        system = (
+            "你是数据源获取助手。你只能从给定的工具列表中选择一个最合适的工具来执行用户任务。\n"
+            "你必须输出一个 JSON 对象，不能输出其他任何文字。\n"
+            "JSON 格式：\n"
+            '{\n  "tool_name": "xxx",\n  "tool_task": "给工具的更具体任务/搜索关键词",\n  "tool_kwargs": {\n    "limit": 5\n  }\n}\n'
+            "规则：\n"
+            "1) tool_name 必须是工具列表中的某一个 name。\n"
+            "2) tool_task 必须可直接传给 tool.run(task=...)。\n"
+            "3) tool_kwargs 只放必要参数；未给的参数由调用方默认值决定。\n"
+            "工具列表：\n"
+            f"{tools_spec}\n"
         )
+        user = f"用户任务：{task}"
 
-    def _wrap_tool_for_langchain(self, tool: BaseTool) -> Tool:
-        """Wrap BaseTool as a LangChain Tool while capturing the latest result."""
+        resp = self.llm.invoke([SystemMessage(content=system), HumanMessage(content=user)])
+        content = getattr(resp, "content", "") or ""
+        data = self._safe_json_loads(content) or {}
 
-        def _run(task: str, limit: int = 5, **kwargs):
-            result = tool.run(task=task, limit=limit, **kwargs)
-            self.last_result = result
-            if result.success:
-                return f"success; output_dir={result.output_dir}; files={len(result.files)}"
-            return f"error: {result.error}"
+        tool_name = str(data.get("tool_name") or "").strip()
+        tool_task = str(data.get("tool_task") or task).strip() or task
+        tool_kwargs = data.get("tool_kwargs") if isinstance(data.get("tool_kwargs"), dict) else {}
 
-        return Tool(
-            name=tool.name,
-            description=tool.description,
-            func=_run,
-        )
+        if "limit" in kwargs and "limit" not in tool_kwargs:
+            tool_kwargs["limit"] = kwargs["limit"]
 
-    def _build_agent(self):
-        return create_agent(
-            model=self.llm,
-            tools=self.lc_tools,
-            system_prompt="你是数据源获取助手。根据用户的任务选择并调用合适的工具。若无合适工具则直接说明。",
-        )
+        if not tool_name:
+            tool_name = next(iter(self.tools.keys()))
+
+        return tool_name, tool_task, tool_kwargs
+
+    @staticmethod
+    def _safe_json_loads(text: str) -> Optional[dict]:
+        text = (text or "").strip()
+        if not text:
+            return None
+        fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S)
+        candidate = fenced.group(1) if fenced else text
+        try:
+            obj = json.loads(candidate)
+            return obj if isinstance(obj, dict) else None
+        except Exception:  # noqa: BLE001
+            pass
+        m = re.search(r"(\{.*\})", candidate, re.S)
+        if not m:
+            return None
+        try:
+            obj = json.loads(m.group(1))
+            return obj if isinstance(obj, dict) else None
+        except Exception:  # noqa: BLE001
+            return None
 
 
 def cli():
