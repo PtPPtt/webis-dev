@@ -5,11 +5,13 @@ Data-source agent built on LangChain to route tasks to tools.
 from __future__ import annotations
 
 import argparse
+import json
 import logging
 import os
 import pathlib
+import re
 import sys
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 try:
     from dotenv import find_dotenv, load_dotenv
@@ -53,12 +55,19 @@ logger.setLevel(logging.INFO)
 def _load_env():
     if not find_dotenv or not load_dotenv:
         return
-    for fname in (".env.local", ".env"):
+    project_root = pathlib.Path(__file__).resolve().parents[1]
+    for fname in (".env", ".env.local"):
+        direct = project_root / fname
+        if direct.exists():
+            load_dotenv(str(direct), override=False)
+            logger.info("Loaded environment from %s", direct)
+            return
+    for fname in (".env", ".env.local"):
         path = find_dotenv(fname, usecwd=True)
         if path:
             load_dotenv(path, override=False)
             logger.info("Loaded environment from %s", path)
-            break
+            return
 
 
 class LangChainDataSourceAgent:
@@ -144,6 +153,44 @@ class LangChainDataSourceAgent:
                 )
             },
         )
+        user = f"用户任务：{task}"
+
+        resp = self.llm.invoke([SystemMessage(content=system), HumanMessage(content=user)])
+        content = getattr(resp, "content", "") or ""
+        data = self._safe_json_loads(content) or {}
+
+        tool_name = str(data.get("tool_name") or "").strip()
+        tool_task = str(data.get("tool_task") or task).strip() or task
+        tool_kwargs = data.get("tool_kwargs") if isinstance(data.get("tool_kwargs"), dict) else {}
+
+        if "limit" in kwargs and "limit" not in tool_kwargs:
+            tool_kwargs["limit"] = kwargs["limit"]
+
+        if not tool_name:
+            tool_name = next(iter(self.tools.keys()))
+
+        return tool_name, tool_task, tool_kwargs
+
+    @staticmethod
+    def _safe_json_loads(text: str) -> Optional[dict]:
+        text = (text or "").strip()
+        if not text:
+            return None
+        fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.S)
+        candidate = fenced.group(1) if fenced else text
+        try:
+            obj = json.loads(candidate)
+            return obj if isinstance(obj, dict) else None
+        except Exception:  # noqa: BLE001
+            pass
+        m = re.search(r"(\{.*\})", candidate, re.S)
+        if not m:
+            return None
+        try:
+            obj = json.loads(m.group(1))
+            return obj if isinstance(obj, dict) else None
+        except Exception:  # noqa: BLE001
+            return None
 
 
 def cli():
