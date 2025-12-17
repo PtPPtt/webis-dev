@@ -29,6 +29,8 @@ class GitHubSearchTool(BaseTool):
                 self.output_dir, repo["name"][:50] + ".html"
             )
             page = requests.get(html_url, timeout=20)
+            if not page.encoding or page.encoding.lower() == "iso-8859-1":
+                page.encoding = page.apparent_encoding
             with open(path, "w", encoding="utf-8") as f:
                 f.write(page.text)
             files.append(path)

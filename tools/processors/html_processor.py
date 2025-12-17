@@ -76,6 +76,32 @@ class HTMLProcessor(BaseFileProcessor):
 
         return '\n\n'.join(cleaned_lines).strip()
 
+    @staticmethod
+    def _maybe_fix_mojibake(text: str) -> str:
+        """
+        修复常见“UTF-8 被当成 Latin-1 解码”导致的中文乱码（如 'æ¸…å�Ž'）。
+        仅在修复后中文字符显著增加时才应用，避免误伤正常内容。
+        """
+        if not text:
+            return text
+
+        def cjk_count(s: str) -> int:
+            return sum(1 for ch in s if "\u4e00" <= ch <= "\u9fff")
+
+        before = cjk_count(text)
+        # 典型 mojibake 会包含大量 'Ã' 'Â' 'å' 'æ' 等字符
+        marker = sum(text.count(x) for x in ("Ã", "Â", "æ", "å", "ç", "é"))
+        if marker < 20:
+            return text
+
+        try:
+            fixed = text.encode("latin-1", errors="ignore").decode("utf-8", errors="ignore")
+        except Exception:
+            return text
+
+        after = cjk_count(fixed)
+        return fixed if after >= before + 10 else text
+
     def _deepseek_enhance(self, text: str) -> str:
         if not self.deepseek_api_key:
             logger.warning("[HTMLProcessor] No DeepSeek API key provided, skipping enhancement")
@@ -153,6 +179,8 @@ class HTMLProcessor(BaseFileProcessor):
                 text_parts = [item.get("content", "").strip() for item in results if item.get("content")]
                 raw_text = "\n\n".join(text_parts)
 
+                # 先修复常见编码导致的乱码，再做规则清理
+                raw_text = self._maybe_fix_mojibake(raw_text)
                 cleaned_text = self._basic_noise_reduction(raw_text)
 
                 if use_deepseek:

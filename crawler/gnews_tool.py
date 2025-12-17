@@ -1,4 +1,5 @@
 import os
+import hashlib
 from typing import Optional
 
 import requests
@@ -47,7 +48,8 @@ class GNewsTool(BaseTool):
 
             title = (a.get("title") or "gnews").strip()
             safe = title[:60].replace("/", "_")
-            html_path = os.path.join(self.output_dir, safe + ".html")
+            h = hashlib.md5(link.encode("utf-8", errors="ignore")).hexdigest()[:8]
+            html_path = os.path.join(self.output_dir, f"{safe}_{h}.html")
             self._fetch_page(link, html_path)
             files.append(html_path)
 
@@ -71,6 +73,8 @@ class GNewsTool(BaseTool):
 
     def _fetch_page(self, url: str, path: str) -> None:
         r = requests.get(url, timeout=20)
+        if not r.encoding or r.encoding.lower() == "iso-8859-1":
+            r.encoding = r.apparent_encoding
         r.raise_for_status()
         with open(path, "w", encoding="utf-8") as f:
             f.write(r.text)

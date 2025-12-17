@@ -32,7 +32,10 @@ class HackerNewsTool(BaseTool):
             if not url:
                 continue
 
-            html = requests.get(url, timeout=20).text
+            r = requests.get(url, timeout=20)
+            if not r.encoding or r.encoding.lower() == "iso-8859-1":
+                r.encoding = r.apparent_encoding
+            html = r.text
             path = os.path.join(self.output_dir, f"hn_{i}.html")
             with open(path, "w", encoding="utf-8") as f:
                 f.write(html)

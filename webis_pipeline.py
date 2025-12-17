@@ -17,6 +17,7 @@ import os
 import pathlib
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Tuple
 
 
@@ -67,7 +68,9 @@ def _collect_crawl_files(output_dir: str) -> List[str]:
     return sorted(files)
 
 
-def _extract_texts(file_paths: List[str], text_out_dir: pathlib.Path) -> Tuple[List[str], List[dict]]:
+def _extract_texts(
+    file_paths: List[str], text_out_dir: pathlib.Path, workers: int = 1, verbose: bool = False
+) -> Tuple[List[str], List[dict]]:
     """
     Use tools/ UnifiedFileProcessor to extract clean text.
     Returns (texts, per_file_results_for_manifest).
@@ -78,15 +81,40 @@ def _extract_texts(file_paths: List[str], text_out_dir: pathlib.Path) -> Tuple[L
 
     from file_processor import UnifiedFileProcessor  # type: ignore
 
-    processor = UnifiedFileProcessor()
     texts: List[str] = []
     manifest_rows: List[dict] = []
 
     text_out_dir.mkdir(parents=True, exist_ok=True)
 
-    for idx, fp in enumerate(file_paths, start=1):
+    def _one(idx: int, fp: str):
+        # 为了线程安全与避免共享状态，每个任务单独创建 UnifiedFileProcessor
+        processor = UnifiedFileProcessor()
         path = pathlib.Path(fp)
         result = processor.extract_text(str(path))
+        return idx, path, result
+
+    if workers < 1:
+        workers = 1
+
+    results_by_idx: dict[int, dict] = {}
+    paths_by_idx: dict[int, pathlib.Path] = {}
+
+    if workers == 1 or len(file_paths) <= 1:
+        for idx, fp in enumerate(file_paths, start=1):
+            i, path, result = _one(idx, fp)
+            results_by_idx[i] = result
+            paths_by_idx[i] = path
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            futs = [ex.submit(_one, idx, fp) for idx, fp in enumerate(file_paths, start=1)]
+            for fut in as_completed(futs):
+                i, path, result = fut.result()
+                results_by_idx[i] = result
+                paths_by_idx[i] = path
+
+    for idx in range(1, len(file_paths) + 1):
+        path = paths_by_idx[idx]
+        result = results_by_idx[idx]
 
         row = {
             "input": str(path),
@@ -115,6 +143,7 @@ def main():
     parser.add_argument("--limit", type=int, default=5, help="crawler 最大抓取数量（默认 5）")
     parser.add_argument("--out", type=str, default=None, help="输出目录（默认 pipeline_outputs/<timestamp>/）")
     parser.add_argument("--verbose", action="store_true", help="打印每个文件的处理中间信息")
+    parser.add_argument("--workers", type=int, default=4, help="tools 清洗并发数（默认 4）")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -182,12 +211,14 @@ def main():
     if args.verbose and crawl_result.meta:
         log("[1/3] crawler：执行历史")
         log(json.dumps(crawl_result.meta, ensure_ascii=False, indent=2))
+    if crawl_result.error:
+        log(f"[1/3] crawler：未达目标：{crawl_result.error}")
     (run_dir / "crawl_files.json").write_text(json.dumps(crawl_files, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # 2) Clean to texts
     log("\n[2/3] tools：开始清洗/抽取纯文本…")
     texts_dir = run_dir / "texts"
-    texts, clean_rows = _extract_texts(crawl_files, texts_dir)
+    texts, clean_rows = _extract_texts(crawl_files, texts_dir, workers=args.workers, verbose=args.verbose)
     ok = sum(1 for r in clean_rows if r.get("success"))
     bad = len(clean_rows) - ok
     log(f"[2/3] tools：完成（成功 {ok} / 失败 {bad}） texts_dir={texts_dir}")

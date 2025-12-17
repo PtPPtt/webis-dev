@@ -3,6 +3,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
+import hashlib
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -273,7 +274,8 @@ class BaiduAiSearchMcpTool(BaseTool):
     @staticmethod
     def _safe_filename(url: str, idx: int) -> str:
         host = urlparse(url).netloc.replace(":", "_") or "site"
-        return f"baidu_{idx:02d}_{host}"
+        h = hashlib.md5(url.encode("utf-8", errors="ignore")).hexdigest()[:8]
+        return f"baidu_{idx:02d}_{host}_{h}"
 
     @staticmethod
     def _fetch_page(url: str, path: str) -> None:
@@ -285,6 +287,9 @@ class BaiduAiSearchMcpTool(BaseTool):
             )
         }
         r = requests.get(url, headers=headers, timeout=20)
+        # 某些站点不返回 charset，requests 会默认 ISO-8859-1，导致中文页面乱码（mojibake）
+        if not r.encoding or r.encoding.lower() == "iso-8859-1":
+            r.encoding = r.apparent_encoding
         r.raise_for_status()
         with open(path, "w", encoding="utf-8") as f:
             f.write(r.text)

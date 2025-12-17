@@ -86,7 +86,7 @@ class LangChainDataSourceAgent:
     def available_tools(self) -> List[str]:
         return list(self.tools.keys())
 
-    def run(self, task: str, limit: int = 5, max_rounds: int = 4, **kwargs) -> ToolResult:
+    def run(self, task: str, limit: int = 5, max_rounds: int = 10, **kwargs) -> ToolResult:
         """
         总调度：
         - 目标：尽量拿到 limit 条数据（文件），不足则自动继续尝试
@@ -98,19 +98,29 @@ class LangChainDataSourceAgent:
         collected: List[str] = []
         used_tools: List[dict] = []
 
+        file_exts = self._detect_file_exts(task)
+
         for round_idx in range(1, max_rounds + 1):
             remaining = max(0, int(limit) - len(collected))
             if remaining == 0:
                 break
 
-            choice = self._choose_tool(
-                user_task=task,
-                remaining=remaining,
-                already_have=len(collected),
-                history=used_tools,
-                extra_kwargs=kwargs,
-            )
-            tool_name, tool_task, tool_kwargs = choice
+            # 规则优先：如果任务明确要下载 PDF/文档，第一轮先走“可下载文件”的通用抓取工具，
+            # 避免模型误选只抓 HTML 的通用搜索工具。
+            if round_idx == 1 and file_exts and "duckduckgo_scrapy" in self.tools:
+                tool_name = "duckduckgo_scrapy"
+                tool_task = self._build_file_query(task, file_exts)
+                tool_kwargs = {"limit": remaining}
+                selection = "rule_based_file_download"
+            else:
+                tool_name, tool_task, tool_kwargs = self._choose_tool(
+                    user_task=task,
+                    remaining=remaining,
+                    already_have=len(collected),
+                    history=used_tools,
+                    extra_kwargs=kwargs,
+                )
+                selection = "llm"
             self.last_choice = {"tool_name": tool_name, "tool_task": tool_task, "tool_kwargs": tool_kwargs}
 
             tool = self.tools.get(tool_name)
@@ -149,6 +159,7 @@ class LangChainDataSourceAgent:
                     "tool": tool_name,
                     "tool_task": tool_task,
                     "tool_kwargs": merged_kwargs,
+                    "selection": selection,
                     "success": result.success,
                     "error": result.error,
                     "got": len(result.files or []),
@@ -160,7 +171,7 @@ class LangChainDataSourceAgent:
             # 如果这轮没拿到任何新文件，下一轮让模型换个工具；但最多重试 max_rounds 次
 
         success = len(collected) > 0
-        err = None
+        err: Optional[str] = None
         if len(collected) < int(limit):
             err = f"仅获取到 {len(collected)}/{limit} 条数据"
 
@@ -170,7 +181,7 @@ class LangChainDataSourceAgent:
             files=collected,
             output_dir=None,
             meta={"requested": limit, "collected": len(collected), "history": used_tools},
-            error=err if not success else None,
+            error=err if err else (None if success else "未获取到任何数据"),
         )
 
     def _choose_tool(
@@ -211,6 +222,9 @@ class LangChainDataSourceAgent:
             "工具选择优先级：\n"
             "1) 优先选择 specialized 工具（当其能力标签 caps 与任务明显匹配，例如 news/academic/github）。\n"
             "2) 若 specialized 不适用或连续无结果，再选择 general 工具（通用搜索/通用爬虫引擎）兜底。\n\n"
+            "文件型任务规则（很重要）：\n"
+            "- 如果用户明确提到 PDF/Word/PPT/文档/文件下载/附件，请优先选择 caps 包含 download_files 的工具；\n"
+            "- SerpApi/百度 MCP 主要用于抓取 HTML 页面，本身不负责下载 PDF。\n\n"
             "你必须输出一个 JSON 对象，不能输出其他任何文字。\n"
             "JSON 格式：\n"
             '{\n  "tool_name": "xxx",\n  "tool_task": "给工具的更具体查询词（可翻译/改写）",\n  "tool_kwargs": {\n    "limit": 2,\n    "lang": "en"\n  }\n}\n'
@@ -252,6 +266,41 @@ class LangChainDataSourceAgent:
             tool_name = (ok_tools_sorted[0].name if ok_tools_sorted else next(iter(self.tools.keys())))
 
         return tool_name, tool_task, tool_kwargs
+
+    @staticmethod
+    def _detect_file_exts(task: str) -> List[str]:
+        """
+        从用户任务里粗略识别“文件下载意图”。
+        返回需要的文件后缀列表（无则为空）。
+        """
+        t = (task or "").lower()
+        exts: List[str] = []
+        if "pdf" in t or "论文" in task or "文献" in task:
+            exts.append("pdf")
+        if "docx" in t or "doc" in t or "word" in t:
+            exts.extend(["doc", "docx"])
+        if "ppt" in t or "pptx" in t:
+            exts.extend(["ppt", "pptx"])
+        # 去重保序
+        out: List[str] = []
+        for e in exts:
+            if e not in out:
+                out.append(e)
+        return out
+
+    @staticmethod
+    def _build_file_query(task: str, exts: List[str]) -> str:
+        """
+        给“可下载文件”的工具构造更强的查询关键词。
+        注意：不强制绑定 filetype（因为不同引擎语法不一），但会显式加入扩展名关键词。
+        """
+        base = (task or "").strip()
+        if not base:
+            return ""
+        suffix = " ".join([f".{e}" for e in exts]) if exts else ""
+        # 加一个 “filetype:pdf” 作为通用提示词（即便引擎不支持也通常不会坏）
+        hint = " ".join([f"filetype:{e}" for e in exts]) if exts else ""
+        return " ".join([base, suffix, hint]).strip()
 
     @staticmethod
     def _safe_json_loads(text: str) -> Optional[dict]:

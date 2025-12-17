@@ -3,6 +3,7 @@ import os
 import re
 import time
 from typing import Optional
+import hashlib
 from urllib.parse import urlparse
 
 import requests
@@ -117,6 +118,8 @@ class SerpApiSearchTool(BaseTool):
             )
         }
         r = requests.get(url, headers=headers, timeout=20)
+        if not r.encoding or r.encoding.lower() == "iso-8859-1":
+            r.encoding = r.apparent_encoding
         r.raise_for_status()
         with open(path, "w", encoding="utf-8") as f:
             f.write(r.text)
@@ -127,4 +130,5 @@ class SerpApiSearchTool(BaseTool):
         base = re.sub(r"[^a-zA-Z0-9\u4e00-\u9fff._-]+", "_", title)[:80].strip("_")
         if not base:
             base = f"result_{idx}"
-        return f"serp_{idx:02d}_{host}_{base}"
+        h = hashlib.md5(url.encode("utf-8", errors="ignore")).hexdigest()[:8]
+        return f"serp_{idx:02d}_{host}_{h}_{base}"
