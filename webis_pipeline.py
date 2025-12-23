@@ -137,6 +137,20 @@ def _extract_texts(
     return texts, manifest_rows
 
 
+def _run_visualization(output_path: pathlib.Path, log):
+    try:
+        from visualization import visual as visual_app
+    except Exception as exc:  # pragma: no cover - best effort integration
+        log(f"[4/4] visualization: skipped (import error: {exc})")
+        return
+
+    try:
+        visual_app.main([str(output_path)])
+        log(f"[4/4] visualization: 可视化完成，结果保存在 pipeline_outputs/output_HTML/ 目录下")
+    except Exception as exc:  # pragma: no cover - external integration
+        log(f"[4/4] visualization: 可视化失败 ({exc})")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Webis end-to-end pipeline (crawler -> clean -> structuring).")
     parser.add_argument("task", help="一句自然语言任务：既描述要抓取什么，也描述要结构化成什么。")
@@ -274,6 +288,10 @@ def main():
         },
     }
     (run_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # 4) Visualization
+    log("\n[4/4] visualization: 开始进行可视化")
+    _run_visualization(out_path, log)
 
     print(f"\n完成：{run_dir}")
     print(f"- crawl: {crawl_result.output_dir}")

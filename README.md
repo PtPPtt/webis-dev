@@ -1,444 +1,244 @@
-# Webis - Multimodal Data Extraction Framework
+# Webis: From Web Data Crawling to Thematic Knowledge Base in an Efficient Pipeline
 
-[English](README.md) | [中文](README_CN.md)
+[English](README.md) | [Chinese](README_CN.md)
 
-![Python Version](https://img.shields.io/badge/Python-3.9+-blue)  
+![Python Version](https://img.shields.io/badge/Python-3.9+-blue)
+![License](https://img.shields.io/badge/License-Open%20Source-green)
 
-![License](https://img.shields.io/badge/License-Open%20Source-green) 
+## Project Overview
 
-## Overview
+**Webis** is a powerful end-to-end data processing platform that combines **large language models (LLMs)** with **crawler tooling**. It provides a high-efficiency, automated pipeline for data processing. The platform helps users quickly collect unstructured web data, clean it, and produce structured outputs such as JSON or Markdown reports, enabling rapid construction of thematic knowledge bases.
 
-Webis is a full-link efficient processing pipeline covering web data crawling, multimodal data cleaning, and thematic knowledge base construction. The framework deeply integrates professional cleaning tools for multimodal data such as documents, PDFs, images, and HTML web pages. It can automatically identify file types, intelligently match corresponding processing modules, support batch processing of various data, and output standardized structured results. Currently, Webis has integrated four core modal data processing tools, among which Webis_HTML is an independently developed web page data extraction tool by the team — relying on three-level denoising technology, it can accurately strip redundant web page information and efficiently extract core valuable content. This tool has been simultaneously released as an independent Python package to the PyPi repository for developers to directly install and call.
+In today's information explosion, data and content are generated constantly. Traditional data processing is often slow and inefficient. Webis uses an intelligent pipeline design to greatly improve the efficiency of data collection, cleaning, and structuring. It also supports **customization** and **flexible extensibility**, so it can adapt to different application scenarios.
+
+---
 
 ## Table of Contents
 
-- [Quick Start](#quick-start)
+1. [Project Overview](#project-overview)
+2. [Key Features](#key-features)
+3. [Quick Start](#quick-start)
+   - [System Requirements](#system-requirements)
+   - [Installation](#installation)
+   - [Configure API Keys](#configure-api-keys)
+4. [Main Directory Structure](#main-directory-structure)
+5. [Usage](#usage)
+   - [CLI Parameters](#cli-parameters)
+   - [Outputs and Directory Structure](#outputs-and-directory-structure)
+   - [Example 1: Layoff Information from Chinese Enterprises](#example-1-layoff-information-from-chinese-enterprises)
+   - [Example 2: Recent News from Peking University](#example-2-recent-news-from-peking-university)
+6. [Development and Extensions](#development-and-extensions)
+7. [Contributing](#contributing)
 
-- [Environment Configuration](#environment-configuration)
+---
 
-- [API Documentation](#api-documentation)
+## Key Features
 
-- [Usage Examples](#usage-examples)
+- **Intelligent Data Processing and Structured Extraction**
+  Webis provides a three-stage pipeline: data crawling -> text cleaning -> structured output. It can deeply extract content from news, reports, and articles to produce structured knowledge bases such as JSON and Markdown reports.
 
-- [Supported File Types](#supported-file-types)
+- **Plugin Architecture with Flexible Extensions**
+  The system includes multiple built-in crawler tools and supports custom crawler tools and parsers as plugins. You can extend it to fit different data sources and formats.
 
-- [Features](#features)
+- **Multi-Domain Application Examples**
+  Webis supports data collection and processing across domains. Two typical examples are:
 
-- [Development and Extension](#development-and-extension)
+  - **Enterprise Status Analysis**: Users can request data about layoffs from domestic companies and generate structured reports, including company names, layoff scale, time, and industry context.
 
-- [Frequently Asked Questions](#frequently-asked-questions)
+  - **Academic News and Event Reports**: For example, the system can crawl recent news from Peking University, automatically extract academic events, innovation contests, awards, and summarize them into structured reports for quick overview.
 
-- [License and Contribution](#license-and-contribution)
+---
 
 ## Quick Start
 
-### Prerequisites
+### System Requirements
 
-- Python 3.9+
+- Python **3.9 or 3.10**
+- Environment management with **Conda** or **UV**
+- Git access
+- LLM API Key (e.g., SiliconFlow / DeepSeek)
 
-- Conda environment or uv environment
+### Installation
 
-### Environment Configuration
+1. **Install with Conda**
 
-#### Method 1: Automatic Configuration Script (Recommended)
+   ```bash
+   git clone https://github.com/Easonnoway/webis-dev.git
+   cd webis-dev
+   bash setup/conda_setup.sh
+   conda activate webis
+   ```
 
-```
-# Run the automatic configuration script
-bash setup/conda_setup.sh
-# For uv environment
-bash setup/uv_setup.sh
-```
+2. **Install with UV**
 
-#### Method 2: Manual Configuration
+   ```bash
+   git clone https://github.com/Easonnoway/webis-dev.git
+   cd webis-dev
+   bash setup/uv_setup.sh
+   source webis/bin/activate
+   ```
 
-```
-# Create and activate Conda environment
-conda create -n webis python=3.9 -y
-conda activate webis
+### Configure API Keys
 
-# Install dependencies
-pip install -r setup/requirements.txt
-```
+#### Primary LLM API Key
 
-#### Method 3: Using Homebrew (macOS)
+- `SILICONFLOW_API_KEY` (recommended) or `DEEPSEEK_API_KEY` (compatible)
 
-```
-# Install Homebrew
-/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+#### Optional Crawler Tool API Keys
 
-# Install Python
-brew install python
+- The system will automatically choose tools based on available keys. Tools without keys will be disabled.
 
-# Verify installation
-python3 --version
-pip3 --version
+- News search
+  - `GNEWS_API_KEY` - for GNewsTool
+  - `SERPAPI_API_KEY` - for SerpApi Google Search
+  - `BAIDU_AISEARCH_BEARER` - for Baidu AI Search
 
-# Install dependencies
-pip install -r setup/requirements.txt
-```
+- Code search
+  - `GITHUB_TOKEN` - for GitHub search
 
-### Basic Usage
+Make sure `.env.local` or `.env` contains the LLM API key(s):
 
-```
-# Activate the environment
-conda activate webis
-
-# Process a single file
-python process_file.py tools/data/pdf/example.pdf
-
-# Run full demo
-python examples/demo.py
-
-# Run crawler knowledge base demo
-python examples/crawler_demo.py "keywords" --limit 5
+```env
+# required
+SILICONFLOW_API_KEY=your_key_here
+# optional
+GNEWS_API_KEY=your_key_here
+SERPAPI_API_KEY=your_key_here
+BAIDU_AISEARCH_BEARER=your_key_here
+GITHUB_TOKEN=your_token_here
 ```
 
-## API Documentation
+---
 
-### 1. Individual Processor Interfaces
-
-#### DocumentProcessor - Document Processor
+## Main Directory Structure
 
 ```
-from file_processor import DocumentProcessor
-
-processor = DocumentProcessor()
-
-# Check if file type is supported
-if processor.can_process("test.docx"):
-    # Extract text
-    result = processor.extract_text("test.docx")
-    if result["success"]:
-        print(result["text"])
-    else:
-        print(f"Error: {result['error']}")
+webis-dev/
+|-- crawler/                 # crawler tools and code
+|-- tools/                   # file-type processors
+|-- structuring/             # prompts and extraction templates
+|-- setup/                   # installation and dependency scripts
+|-- webis_pipeline.py        # main pipeline entry
+|-- README.md
+|-- .env.local
+`-- pipeline_outputs/        # runtime outputs
 ```
 
-#### PDFProcessor - PDF Processor
+---
+
+## Usage
+
+### CLI Parameters
+
+Webis provides a set of command-line parameters to control execution. Main parameters:
+
+| Option      | Type | Default                         | Description                                        |
+| ----------- | ---- | ------------------------------- | -------------------------------------------------- |
+| `task`      | str  | (required)                      | Natural language task for crawling and structuring |
+| `--limit`   | int  | `5`                             | Maximum number of items to crawl                   |
+| `--out`     | str  | `pipeline_outputs/<timestamp>/` | Custom output directory                            |
+| `--verbose` | flag | `False`                         | Enable detailed logging                            |
+| `--workers` | int  | `4`                             | Parallel workers for text extraction               |
+
+### Outputs and Directory Structure
+
+After execution, outputs are saved in a time-stamped directory:
 
 ```
-from file_processor import PDFProcessor
-
-processor = PDFProcessor()
-
-# Extract text from PDF
-result = processor.extract_text("document.pdf")
-if result["success"]:
-    print(result["text"])  # Includes page number information
+pipeline_outputs/
+`-- <timestamp>/                    # Run ID (Unix timestamp)
+    |-- manifest.json               # Complete execution metadata
+    |-- crawl_files.json            # List of acquired files
+    |-- texts/                      # Cleaned text files
+    |   |-- 0001_filename1.txt
+    |   |-- 0002_filename2.txt
+    |   `-- ...
+    `-- structured/                 # Final structured output
+        |-- prompt.txt              # Generated extraction prompt
+        `-- result.{json|md}        # Structured result
 ```
 
-#### ImageProcessor - Image OCR Processor
+### Structured Data Visualization
 
-```
-from file_processor import ImageProcessor
+After the structured result is generated, you can use `visualization/visual.py` to convert the Webis pipeline output into a visual HTML page. The script saves the page to `pipeline_outputs/output_HTML/` and automatically opens it in the local browser.
 
-processor = ImageProcessor()
+Example:
 
-# OCR recognition for images
-result = processor.extract_text("image.png")
-if result["success"]:
-    print(result["text"])
+```bash
+python visualization/visual.py pipeline_outputs/<timestamp>/structured/result.json
 ```
 
-> **Note**: The first time you use the image processor, it will automatically download the open-source EasyOCR model, which may take some time. Please be patient. Subsequent uses will directly load the downloaded model. If the download fails, we recommend trying to use a VPN.
+Replace the path with your actual structured result file.
 
-#### HTMLProcessor - HTML Processor
+### Example 1: Layoff Information from Chinese Enterprises
 
-**Webis_HTML** is an independent HTML web page data extraction tool developed for Webis. [html_processor.py](http://html_processor.py) implements this functionality by directly calling the webis-html Python library.
+Users can request crawling and analysis of **layoff information from Chinese enterprises**, and produce structured reports including company names, layoff scale, time, and more. Example command:
 
-- **Installation**: Install via pip install webis-html (already included in requirements.txt)
-
-- **No Server Required**: The webis-html library automatically handles HTML content extraction without the need to start additional servers
-
-**Usage Example**:
-
-```
-from file_processor import HTMLProcessor
-
-processor = HTMLProcessor()
-
-# Extract text from HTML
-result = processor.extract_text("example.html")
-if result["success"]:
-    print(result["text"])
+```bash
+python webis_pipeline.py "Check recent layoffs in Chinese enterprises and output in structured form" --limit 10 --verbose
 ```
 
-**API Key Configuration** (Required for HTML Processing):
-
-- **Obtain API Key**: Visit [SiliconFlow](https://www.siliconflow.com/) to register an account and get an API key
-
-- **Configure Environment Variables**:
-
-```
-export DEEPSEEK_API_KEY="your-siliconflow-api-key"
-# Or
-export LLM_PREDICTOR_API_KEY="your-siliconflow-api-key"
-```
-
-- **Conda Environment Configuration** (Recommended):
-
-```
-conda env config vars set DEEPSEEK_API_KEY="your-siliconflow-api-key" -n webis
-conda activate webis  # Reactivate the environment for changes to take effect
-```
-
-> **Important**: The HTML processing function requires content filtering optimization via the SiliconFlow API, which requires configuring the corresponding API key. Please obtain the API key from [SiliconFlow](https://www.siliconflow.com/). The HTML processing function cannot be used without configuring the API key.
-
-### 2. Unified Processor Interface
-
-#### UnifiedFileProcessor - Unified Processor
-
-```
-from file_processor import UnifiedFileProcessor
-
-processor = UnifiedFileProcessor()
-
-# Automatically determine file type and process
-result = processor.extract_text("any_file.pdf")
-print(f"File Type: {result['file_type']}")
-print(f"Text Content: {result['text']}")
-```
-
-### 3. Convenience Function Interfaces
-
-#### Single File Processing
-
-```
-from file_processor import extract_text_from_file
-
-# Simplest usage
-result = extract_text_from_file("file.pdf")
-if result["success"]:
-    print(f"File Type: {result['file_type']}")
-    print(f"Text Length: {len(result['text'])} characters")
-    print(result["text"])
-```
-
-#### Batch File Processing
-
-```
-from file_processor import batch_extract_text
-
-# Batch process multiple files
-file_paths = ["doc1.pdf", "doc2.docx", "image1.png"]
-results = batch_extract_text(file_paths)
-
-for file_path, result in results.items():
-    if result["success"]:
-        print(f"{file_path}: {len(result['text'])} characters")
-    else:
-        print(f"{file_path}: {result['error']}")
-```
-
-## Usage Examples
-
-### Command Line Usage
-
-```
-# Process a single file
-python3 file_processor.py document.pdf
-
-# View supported file types
-python3 file_processor.py
-```
-
-### Python Script Usage
-
-```
-#!/usr/bin/env python3
-from file_processor import extract_text_from_file
-
-def main():
-    # Process different types of files
-    files = [
-        "pdf/example.pdf",
-        "Doc/demo.pdf",
-        "Pic/demo.png"  # Corrected file extension for consistency
-    ]
-    
-    for file_path in files:
-        print(f"\nProcessing file: {file_path}")
-        result = extract_text_from_file(file_path)
-        
-        if result["success"]:
-            print(f"File Type: {result['file_type']}")
-            print(f"Text Length: {len(result['text'])} characters")
-            print("Text Preview:")
-            print(result["text"][:300] + "...")
-        else:
-            print(f"Processing failed: {result['error']}")
-
-if __name__ == "__main__":
-    main()
-```
-
-### Integration in Code
-
-```
-# Add tool path
-import sys
-sys.path.append('tools')
-
-from file_processor import extract_text_from_file
-
-# Process file
-result = extract_text_from_file('your_file.pdf')
-if result['success']:
-    print(result['text'])
-```
-
-### Crawler Knowledge Base Demo
-
-[crawler_demo.py](http://crawler_demo.py) is a complete web crawler example that can automatically search, download, and process online document materials to generate a knowledge base.
-
-**Features**:
-
-- Automatically search for relevant materials (PDF, DOC, DOCX, PPT, PPTX, HTML, etc.) using the DuckDuckGo search engine
-
-- Automatically download found files to local
-
-- Use Webis UnifiedFileProcessor to automatically process downloaded files
-
-- Generate structured knowledge base JSON file
-
-**Usage**:
-
-```
-# Basic usage: Search for keywords and process the first 5 results
-python examples/crawler_demo.py "Python tutorial" --limit 5
-
-# Search for more results
-python examples/crawler_demo.py "machine learning" --limit 10
-
-# Specify file type in search (include filetype: in keywords)
-python examples/crawler_demo.py "deep learning filetype:pdf" --limit 3
-```
-
-**Output Results**:
-
-- Downloaded files are saved in the examples/outputs/downloaded_materials/ directory
-
-- Knowledge base file is saved in examples/outputs/knowledge_base.json
-
-- The knowledge base includes processing results, extracted text content, file types, etc., for each file
-
-**Knowledge Base Format**:
+**Example Output (partial):**
 
 ```
 [
   {
-    "source_file": "example.pdf",
-    "file_type": "pdf",
-    "processed_time": "2025-11-27 14:00:00",
-    "content": "Extracted text content...",
-    "status": "success",
-    "error": ""
+    "company_name": "JinkoSolar",
+    "industry": "Photovoltaics",
+    "layoff_scale": "5400 employees, layoff rate 6%",
+    "layoff_time": "within the last half-year (2024-2025)",
+    "notes": "Leading enterprise with significant workforce reduction"
   }
 ]
 ```
 
-**Notes**:
+### Example 2: Recent News from Peking University
 
-- Requires configuring the DEEPSEEK_API_KEY environment variable. Please obtain the API key from [SiliconFlow](https://www.siliconflow.com/) (used for HTML processing optimization)
+Users can request summarization of **recent news from Peking University** into a report format, covering academic events, innovation competitions, and other key items. Example command:
 
-- The search function relies on network connectivity; some websites may be inaccessible
-
-- Downloaded files are saved in the examples/outputs/downloaded_materials/ directory
-
-- It is recommended to use the --limit parameter to restrict the number of results to avoid downloading too many files
-
-## Supported File Types
-
-| Type     | Extensions                     | Processing Tool | Description                                                  |
-| -------- | ------------------------------ | --------------- | ------------------------------------------------------------ |
-| Document | .txt, .md, .docx               | LangChain       | Direct text extraction                                       |
-| PDF      | .pdf                           | PyPDF           | Page-by-page extraction with page number retention           |
-| Image    | .png, .jpg, .jpeg, .bmp, .tiff | EasyOCR         | Optical Character Recognition (OCR)                          |
-| HTML     | .html                          | Webis_HTML      | Extract and clean web page data using a self-designed fine-tuned model |
-
-## Features
-
-- **Automatic File Type Recognition**: Automatically select the appropriate processing tool based on file extension
-
-- **Unified Interface**: Provide a consistent API to process different types of files
-
-- **Batch Processing**: Support batch processing of multiple files
-
-- **Error Handling**: Comprehensive error handling and logging
-
-- **Chinese Support**: Full support for Chinese documents and OCR
-
-- **Extensibility**: Easy to add support for new file types
-
-- **Modular Design**: Independent processors for easy maintenance and extension
-
-- **Structured Output**: All processors return results in a unified format
-
-### Result Format
-
-All processors return results in a unified format:
-
-```
-{
-    "success": bool,        # Whether processing was successful
-    "text": str,           # Extracted text content
-    "error": str,          # Error message (if failed)
-    "file_type": str       # File type (only for unified interface)
-}
+```bash
+python webis_pipeline.py "Summarize recent news from Peking University" --limit 10 --verbose
 ```
 
-## Development and Extension
+**Example Output:**
 
-### How to Add a New File Processing Type
+```
+Report on recent news from Peking University
 
-1. Create a new processor class (inheriting BaseFileProcessor) in tools/processors/
+Based on the provided text, the following is a summary of major recent news events:
 
-1. Import and register the new processor in tools/processors/[__init__.py](http://__init__.py)
+1. Academic forums and discipline development
+2. Innovation and entrepreneurship activities
+3. Awards and scholarships
+4. Scholar viewpoints and academic exchange
+```
 
-1. Register the new type in UnifiedFileProcessor in tools/[file_processor.py](http://file_processor.py)
+---
 
-1. Update the list of supported extensions and documentation
+## Development and Extensions
 
-### Performance Optimization Suggestions
+### Extend Crawler Tools
 
-1. **Batch Processing**: Use batch_extract_text() to process multiple files
+Webis crawler components follow a unified plugin specification. To add a new data source, implement the **BaseTool interface**:
 
-1. **Lazy Loading**: The image processor uses lazy loading to avoid unnecessary model initialization
+1. Define tool metadata (name, description, capabilities)
+2. Implement the `run(task, **kwargs)` method to return standardized crawl results
+3. Register the tool into the crawler agent for scheduling
 
-1. **Result Caching**: Cache results for files that need to be processed repeatedly
+This design ensures consistency across crawler implementations and enables flexible strategy switching or combination.
 
-1. **Parallel Processing**: Consider multi-process parallel processing for large numbers of files
+### Extend File Processors
 
-## Frequently Asked Questions
+All file-processing logic (HTML, PDF, image OCR, etc.) also uses a plugin pattern. To add a custom processor:
 
-### Q: Errors occur when installing dependencies?
+- Implement the `BaseFileProcessor` class and define supported file extensions
+- Implement `extract_text()` to extract text content
+- Return standardized fields such as `success`, `text`, and `meta`
 
-A: Ensure you are using the correct Python version (3.8+). You may need to use pip3 instead of pip.
+This makes it easy to add support for new file types or specialized cleaning strategies.
 
-### Q: EasyOCR runs very slowly the first time?
+---
 
-A: EasyOCR downloads the model file on first use. Please be patient.
+## Contributing
 
-### Q: Image recognition accuracy is low?
-
-A: You can try:
-
-- Increasing image resolution
-
-- Ensuring text clarity
-
-- Adjusting the confidence threshold (confidence > 0.5 in code)
-
-### Q: Unable to extract text from PDF?
-
-A: It may be a scanned PDF. We recommend converting it to an image first and then using OCR for processing.
-
-## License and Contribution
-
-### License
-
-This project is licensed under an open-source license. For specific license information, please refer to the LICENSE file in the project root directory.
-
-### Contribution
-
-Contributions are welcome! Please submit issues or pull requests on GitHub. For support, please contact us via GitHub Issues.
+Contributions are welcome. Please open issues or pull requests on GitHub. If you need support, use GitHub Issues to contact us.
