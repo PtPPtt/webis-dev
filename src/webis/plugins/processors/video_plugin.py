@@ -4,7 +4,7 @@ import cv2
 from webis.core.pipeline import PipelineContext
 from webis.core.plugin import Plugin
 
-class VideoKeyframeExtractorPlugin(Plugin):
+class VideoPlugin(Plugin):
     """
     Plugin to extract keyframes from a video file.
     """

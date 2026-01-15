@@ -15,3 +15,15 @@ __all__ = [
     "SemanticScholarPlugin",
     "SerpApiPlugin",
 ]
+
+# Auto-register plugins
+from webis.core.plugin import get_default_registry
+
+registry = get_default_registry()
+registry.register(BaiduSearchPlugin())
+registry.register(DuckDuckGoPlugin())
+registry.register(GitHubSearchPlugin())
+registry.register(GNewsPlugin())
+registry.register(HackerNewsPlugin())
+registry.register(SemanticScholarPlugin())
+registry.register(SerpApiPlugin())
