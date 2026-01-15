@@ -1,13 +1,23 @@
 from .html_cleaner_plugin import HtmlCleanerPlugin
 from .html_fetcher_plugin import HtmlFetcherPlugin
-from .summarizer_plugin import SummarizerPlugin
-from .chunking_plugin import ChunkingPlugin
-from .embedding_plugin import EmbeddingPlugin
+from .video_plugin import VideoPlugin
+from .pdf_plugin import PDFPlugin
+from .document_parse_plugin import DocumentParsePlugin
 
 __all__ = [
     "HtmlCleanerPlugin",
     "HtmlFetcherPlugin",
-    "SummarizerPlugin",
-    "ChunkingPlugin",
-    "EmbeddingPlugin",
+    "VideoPlugin",
+    "PDFPlugin",
+    "DocumentParsePlugin",
 ]
+
+# Auto-register plugins
+from webis.core.plugin import get_default_registry
+
+registry = get_default_registry()
+registry.register(HtmlCleanerPlugin())
+registry.register(HtmlFetcherPlugin())
+registry.register(VideoPlugin())
+registry.register(PDFPlugin())
+registry.register(DocumentParsePlugin())

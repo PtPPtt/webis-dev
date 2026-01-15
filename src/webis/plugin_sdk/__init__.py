@@ -1,6 +1,13 @@
 from .utils import get_logger, HttpClient
 from webis.core.schema import WebisDocument, DocumentType, DocumentMetadata
-from webis.core.plugin import SourcePlugin, ProcessorPlugin
+from webis.core.plugin import (
+    SourcePlugin, 
+    ProcessorPlugin, 
+    ExtractorPlugin, 
+    ModelPlugin, 
+    OutputPlugin, 
+    NotificationPlugin
+)
 
 __all__ = [
     "get_logger",
@@ -9,5 +16,9 @@ __all__ = [
     "DocumentType",
     "DocumentMetadata",
     "SourcePlugin",
-    "ProcessorPlugin"
+    "ProcessorPlugin",
+    "ExtractorPlugin",
+    "ModelPlugin",
+    "OutputPlugin",
+    "NotificationPlugin"
 ]

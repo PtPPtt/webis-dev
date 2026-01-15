@@ -87,6 +87,19 @@ BUILTIN_MODELS: Dict[str, ModelConfig] = {
         context_window=64000,
         supports_json_mode=True,
     ),
+    "deepseek-v3.2": ModelConfig(
+        name="DeepSeek-V3.2",
+        provider="openai", # Wendalog is OpenAI compatible
+        api_key_env="WENDALOG_API_KEY",
+        base_url="https://endpoint.wendalog.com", # Base URL, SDK appends /v1 typically but let's see if this provider needs exact
+        # For OpenAI client with custom base_url, typically it's https://host/v1 if the path isn't standard.
+        # User previously used https://endpoint.wendalog.com/chat/completions implied base might be just the host or host/v1.
+        # Let's assume user input `https://endpoint.wendalog.com` is the base.
+        cost_per_1m_input=0.1, # Estimating
+        cost_per_1m_output=0.1,
+        context_window=64000,
+        supports_json_mode=True,
+    ),
     "deepseek-r1": ModelConfig(
         name="Pro/deepseek-ai/DeepSeek-R1",
         provider="siliconflow",
@@ -380,8 +393,12 @@ def get_default_router() -> LLMRouter:
     global _default_router
     if _default_router is None:
         _default_router = LLMRouter()
-        _default_router.add_model("deepseek-v3", primary=True)
+        
+        # Default to DeepSeek-V3.2 (Wendalog)
+        _default_router.add_model("deepseek-v3.2", primary=True)
+        _default_router.add_model("deepseek-v3", fallback=True)
         _default_router.add_model("gpt-4o-mini", fallback=True)
+            
     return _default_router
 
 

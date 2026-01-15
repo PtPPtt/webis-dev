@@ -22,7 +22,7 @@ import importlib
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterator, List, Optional, Type, TypeVar
+from typing import Any, Dict, Iterator, List, Optional, Type, TypeVar, Union
 
 from webis.core.schema import WebisDocument, PipelineContext
 
@@ -270,6 +270,75 @@ class ExtractorPlugin(BasePlugin):
         raise NotImplementedError
 
 
+class ModelPlugin(BasePlugin):
+    """
+    Base class for LLM/Model plugins.
+    
+    Model plugins encapsulate access to Large Language Models or other inference engines.
+    """
+    
+    # Model capabilities
+    supports_streaming: bool = False
+    supports_function_calling: bool = False
+    supports_vision: bool = False
+    context_window: int = 4096
+    
+    @abstractmethod
+    def generate(
+        self,
+        prompt: Union[str, List[Any]],
+        context: Optional[PipelineContext] = None,
+        **kwargs
+    ) -> str:
+        """
+        Generate text from a prompt.
+        
+        Args:
+            prompt: Input text or messages
+            context: Pipeline context
+            **kwargs: Additional parameters (temperature, max_tokens, etc.)
+            
+        Returns:
+            Generated text content
+        """
+        raise NotImplementedError
+    
+    def count_tokens(self, text: str) -> int:
+        """Estimate token count for text."""
+        # Default simple estimation, override for model-specific tokenization
+        return len(text) // 4
+
+
+class OutputPlugin(BasePlugin):
+    """
+    Base class for output/storage plugins.
+    
+    Output plugins persist structured results or documents to external systems 
+    (Database, File System, API, Visualization service).
+    """
+    
+    @abstractmethod
+    def save(
+        self,
+        data: Union[WebisDocument, "StructuredResult", List[Any]],
+        context: Optional[PipelineContext] = None,
+        **kwargs
+    ) -> bool:
+        """
+        Save data to the destination.
+        
+        Args:
+            data: Data to save (Document, Result, or raw list)
+            context: Pipeline context
+            **kwargs: Additional parameters
+            
+        Returns:
+            True if saved successfully
+        """
+        raise NotImplementedError
+
+
+
 class NotificationPlugin(BasePlugin):
     """
     Base class for notification plugins.
@@ -323,6 +392,8 @@ class PluginRegistry:
         self._sources: Dict[str, SourcePlugin] = {}
         self._processors: Dict[str, ProcessorPlugin] = {}
         self._extractors: Dict[str, ExtractorPlugin] = {}
+        self._models: Dict[str, ModelPlugin] = {}
+        self._outputs: Dict[str, OutputPlugin] = {}
         self._notifications: Dict[str, NotificationPlugin] = {}
         self._all: Dict[str, BasePlugin] = {}
     
@@ -344,6 +415,10 @@ class PluginRegistry:
             self._processors[plugin.name] = plugin
         elif isinstance(plugin, ExtractorPlugin):
             self._extractors[plugin.name] = plugin
+        elif isinstance(plugin, ModelPlugin):
+            self._models[plugin.name] = plugin
+        elif isinstance(plugin, OutputPlugin):
+            self._outputs[plugin.name] = plugin
         elif isinstance(plugin, NotificationPlugin):
             self._notifications[plugin.name] = plugin
         
@@ -391,6 +466,8 @@ class PluginRegistry:
                     and obj is not SourcePlugin
                     and obj is not ProcessorPlugin
                     and obj is not ExtractorPlugin
+                    and obj is not ModelPlugin
+                    and obj is not OutputPlugin
                 ):
                     plugin_class = obj
                     break
@@ -415,6 +492,14 @@ class PluginRegistry:
     def get_extractor(self, name: str) -> Optional[ExtractorPlugin]:
         """Get an extractor plugin by name."""
         return self._extractors.get(name)
+
+    def get_model(self, name: str) -> Optional[ModelPlugin]:
+        """Get a model plugin by name."""
+        return self._models.get(name)
+
+    def get_output(self, name: str) -> Optional[OutputPlugin]:
+        """Get an output plugin by name."""
+        return self._outputs.get(name)
     
     def list_sources(self) -> List[str]:
         """List all registered source plugin names."""
@@ -445,6 +530,8 @@ class PluginRegistry:
         self._sources.pop(name, None)
         self._processors.pop(name, None)
         self._extractors.pop(name, None)
+        self._models.pop(name, None)
+        self._outputs.pop(name, None)
         self._notifications.pop(name, None)
         
         plugin.cleanup()
@@ -459,6 +546,8 @@ class PluginRegistry:
         self._sources.clear()
         self._processors.clear()
         self._extractors.clear()
+        self._models.clear()
+        self._outputs.clear()
         self._notifications.clear()
 
 
@@ -484,6 +573,8 @@ __all__ = [
     "SourcePlugin",
     "ProcessorPlugin",
     "ExtractorPlugin",
+    "ModelPlugin",
+    "OutputPlugin",
     "NotificationPlugin",
     "PluginRegistry",
     "get_default_registry",
