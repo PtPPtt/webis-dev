@@ -109,6 +109,58 @@ class WebisDocument(BaseModel):
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
         return self.model_dump(mode="json")
+    
+    def to_json(self, include_embeddings: bool = True) -> Dict[str, Any]:
+        """Convert to JSON-serializable dictionary with all information preserved.
+        
+        Args:
+            include_embeddings: Whether to include embedding vectors (default: True for complete data)
+        
+        Returns:
+            Dictionary suitable for JSON serialization with all document information
+        """
+        # Serialize chunks with all details
+        chunks_data = []
+        for chunk in self.chunks:
+            chunk_dict = {
+                "id": chunk.id,
+                "content": chunk.content,
+                "index": chunk.index,
+                "metadata": chunk.metadata,
+            }
+            if include_embeddings and chunk.embedding:
+                chunk_dict["embedding"] = chunk.embedding
+            chunks_data.append(chunk_dict)
+        
+        # Build complete document dictionary
+        doc_dict = {
+            "id": self.id,
+            "content": self.content,  # Keep full content
+            "clean_content": self.clean_content,  # Keep full cleaned content
+            "doc_type": self.doc_type.value if hasattr(self.doc_type, 'value') else str(self.doc_type),
+            "status": self.status.value if hasattr(self.status, 'value') else str(self.status),
+            "metadata": {
+                "url": self.meta.url,
+                "title": self.meta.title,
+                "author": self.meta.author,
+                "published_at": self.meta.published_at.isoformat() if self.meta.published_at else None,
+                "fetched_at": self.meta.fetched_at.isoformat() if self.meta.fetched_at else None,
+                "source_plugin": self.meta.source_plugin,
+                "language": self.meta.language,
+                "tags": self.meta.tags,
+                "custom": self.meta.custom,
+            },
+            "chunks": chunks_data,  # Full chunk information
+            "chunks_count": len(self.chunks),
+            "processing_history": self.processing_history,
+            "parent_id": self.parent_id,
+        }
+        
+        # Include embeddings by default for completeness
+        if include_embeddings and self.embeddings:
+            doc_dict["embeddings"] = self.embeddings
+        
+        return doc_dict
 
 
 class DocumentChunk(BaseModel):

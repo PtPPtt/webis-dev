@@ -411,12 +411,16 @@ class PluginRegistry:
         
         if isinstance(plugin, SourcePlugin):
             self._sources[plugin.name] = plugin
+            print("plugin:", plugin, "\n")
         elif isinstance(plugin, ProcessorPlugin):
             self._processors[plugin.name] = plugin
+            print("plugin:", plugin, "\n")
         elif isinstance(plugin, ExtractorPlugin):
             self._extractors[plugin.name] = plugin
+            print("plugin:", plugin, "\n")
         elif isinstance(plugin, ModelPlugin):
             self._models[plugin.name] = plugin
+            print("plugin:", plugin, "\n")
         elif isinstance(plugin, OutputPlugin):
             self._outputs[plugin.name] = plugin
         elif isinstance(plugin, NotificationPlugin):

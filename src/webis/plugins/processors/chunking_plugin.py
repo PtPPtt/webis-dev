@@ -24,6 +24,7 @@ class ChunkingPlugin(ProcessorPlugin):
     
     def __init__(self, config: Optional[dict] = None):
         super().__init__(config)
+        print("lalalalalalallaal\n\n\n\n\n")
         self.chunk_size = self.config.get("chunk_size", 1000)
         self.chunk_overlap = self.config.get("chunk_overlap", 200)
         
