@@ -174,7 +174,7 @@ def example_usage():
     task_pipeline.add_task(PromptEnhancementTask(llm_agent=None))
     
     # Query workflow
-    query = "What are the recent advancements in AI chips?"
+    query = "tell me the recent news of china economy"
     
     print("=" * 70)
     print("RAG EXAMPLE USAGE")

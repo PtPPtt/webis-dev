@@ -364,7 +364,7 @@ class RAGPipeline:
             return True
         
         # Check if top score is below threshold
-        if scores and max(scores) < self.min_score_threshold:
+        if scores and min(scores) < self.min_score_threshold:
             return True
         
         return False
