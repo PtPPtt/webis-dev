@@ -23,16 +23,22 @@ class RAGManager:
         rag_store_path: str = "./RAG/rag_store.json",
         auto_load: bool = True,
         use_external_embeddings: bool = True,
+        embedding_processor=None,
     ):
         """
         Args:
             rag_store_path: Vector storage path
             auto_load: Whether to automatically load existing storage
             use_external_embeddings: Whether to use embeddings from processor (default) or TF-IDF
+            embedding_processor: Optional EmbeddingGemmaPlugin instance for generating embeddings
         """
-        vector_store = SimpleVectorStore(use_external_embeddings=use_external_embeddings)
+        vector_store = SimpleVectorStore(
+            use_external_embeddings=use_external_embeddings,
+            embedding_processor=embedding_processor
+        )
         self.rag = RAGComponent(vector_store=vector_store, store_path=rag_store_path)
         self.rag_store_path = rag_store_path
+        self.embedding_processor = embedding_processor
 
         if auto_load:
             self._try_load()
@@ -68,16 +74,31 @@ class RAGManager:
         """
         doc_ids = []
         for doc in documents:
-            # Handle embeddings: use first embedding if available, or None
+            # Handle embeddings: use first embedding or generate using processor
             embedding = None
+            
+            # 1. First try to use pre-computed embeddings
             if doc.get("embeddings") and len(doc["embeddings"]) > 0:
-                print("processing embeddings...\n")
                 embeddings_list = doc["embeddings"]
                 # Use average of all chunk embeddings or first embedding
                 if isinstance(embeddings_list[0], (list, tuple)):
                     embedding = np.mean(embeddings_list, axis=0) if len(embeddings_list) > 0 else None
                 else:
                     embedding = embeddings_list[0] if embeddings_list else None
+                
+                if embedding is not None:
+                    embedding = np.array(embedding, dtype=np.float32)
+            
+            # 2. If no pre-computed embeddings and processor available, generate them
+            if embedding is None and self.embedding_processor is not None:
+                try:
+                    content = doc.get("content", "")
+                    if content and content.strip():
+                        embedding_vec = self.embedding_processor.embed_text(content)
+                        if embedding_vec is not None:
+                            embedding = np.array(embedding_vec, dtype=np.float32)
+                except Exception as e:
+                    logger.debug(f"Failed to generate embedding for document: {e}")
             
             doc_id = self.rag.add_from_pipeline(
                 clean_text=doc.get("content", ""),

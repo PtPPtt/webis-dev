@@ -55,14 +55,16 @@ class SimpleVectorStore:
     Suitable for small data volume (<10k documents) scenarios.
     """
 
-    def __init__(self, use_external_embeddings: bool = True):
+    def __init__(self, use_external_embeddings: bool = True, embedding_processor=None):
         """
         Args:
             use_external_embeddings: If True, use embeddings from embedding processor.
                                     If False, fall back to TF-IDF.
+            embedding_processor: Optional EmbeddingGemmaPlugin instance for on-demand embedding generation
         """
         self.documents: Dict[str, RAGDocument] = {}
         self.use_external_embeddings = use_external_embeddings
+        self.embedding_processor = embedding_processor
         self._init_embedding_scheme()
 
     def _init_embedding_scheme(self):
@@ -142,7 +144,23 @@ class SimpleVectorStore:
             logger.info(f"✓ Using pre-computed embeddings from external processor for {len(self.documents)} documents")
             return
         
-        # No external embeddings found - need to compute them
+        # No external embeddings found - try to generate them using embedding processor
+        if self.use_external_embeddings and self.embedding_processor is not None:
+            try:
+                logger.info(f"Generating embeddings using EmbeddingGemmaPlugin for {len(self.documents)} documents...")
+                texts = [doc.content for doc in self.documents.values()]
+                embeddings = self.embedding_processor.embed_texts(texts)
+                
+                for i, doc_id in enumerate(self.documents.keys()):
+                    if embeddings[i] is not None:
+                        self.documents[doc_id].embedding = np.array(embeddings[i], dtype=np.float32)
+                
+                logger.info(f"✓ Generated embeddings for {len(self.documents)} documents")
+                return
+            except Exception as e:
+                logger.warning(f"Failed to generate embeddings with processor: {e}")
+        
+        # Fallback to TF-IDF if processor unavailable
         # Lazy initialize TF-IDF if using external embeddings mode (fallback scenario)
         if self.use_external_embeddings and self.vectorizer is None:
             self._init_tfidf_vectorizer()
@@ -207,15 +225,26 @@ class SimpleVectorStore:
             # Use external embeddings or hash-based embeddings
             if all(doc.embedding is not None for doc in self.documents.values()):
                 # All documents have embeddings - use them directly
-                try:
-                    from langchain_openai import OpenAIEmbeddings
-                    embeddings_model = OpenAIEmbeddings()
-                    query_vec = embeddings_model.embed_query(query)
-                except Exception:
-                    # Fallback: use TF-IDF for query if embedding model unavailable
-                    if self.vectorizer:
-                        query_vec = self.vectorizer.transform([query]).toarray().flatten()
-                    else:
+                query_vec = None
+                
+                # Try embedding processor first
+                if self.use_external_embeddings and self.embedding_processor is not None:
+                    try:
+                        query_vec = self.embedding_processor.embed_text(query)
+                        if query_vec is not None:
+                            query_vec = np.array(query_vec, dtype=np.float32).flatten()
+                    except Exception as e:
+                        logger.debug(f"Failed to embed query with processor: {e}")
+                        query_vec = None
+                
+                # Fallback to TF-IDF
+                if query_vec is None:
+                    try:
+                        if self.vectorizer:
+                            query_vec = self.vectorizer.transform([query]).toarray().flatten()
+                        else:
+                            query_vec = self._hash_embedding(query)
+                    except Exception:
                         query_vec = self._hash_embedding(query)
                 
                 scores = []
